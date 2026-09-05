@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // oppai.fans. Build: npm run build (generates public/index.html from
+  // oppai.gen.site, then shadow-cljs release app worker -> public/assets/main.js
+  // + dist/worker.js). Deploy: npm run deploy.
+  //
+  // The Worker owns /api/*; everything else falls through to the static
+  // assets. Same routing discipline as network-awai-apex: image generation
+  // and the fleet model map go browser-direct (Cloudflare 100 s ceiling),
+  // chat and video pass through here.
+  //
+  // Secret, set out of band with `wrangler secret put`, NOT in this file:
+  //   MURAKUMO_GENERATION_TOKEN  signed murakumo capability, scope=generation
+  // Optional: OPPAI_CHAT_MODEL=awai-network/basho, OPPAI_VIDEO_MODEL=hokusai
+  "name": "oppai-fans",
+  "main": "dist/worker.js",
+  "compatibility_date": "2026-07-31",
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  "routes": [
+    { "pattern": "oppai.fans", "custom_domain": true },
+    { "pattern": "www.oppai.fans", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}

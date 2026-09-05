@@ -1,0 +1,48 @@
+{:paths ["src"]
+ :deps
+ {org.clojure/clojure       {:mvn/version "1.12.0"}
+  org.clojure/clojurescript {:mvn/version "1.11.132"}
+  reagent/reagent           {:mvn/version "1.2.0"}
+  re-frame/re-frame         {:mvn/version "1.4.3"}
+
+  ;; UI: jp-go-dds — the デジタル庁デザインシステム (DADS) cljc port. Same skin
+  ;; as the gftd.ai apex (ADR-2607310100), so the two surfaces read as one
+  ;; family without either importing the other's code.
+  ;;
+  ;; All three are :git/sha, not :local/root: a bare clone with no monorepo or
+  ;; west context must be able to build a classpath. That is not a hypothetical
+  ;; — gftdcojp/apex had no CI at all for months precisely because a
+  ;; :local/root base dep made it unresolvable outside the monorepo
+  ;; (ADR-2607250200 axis 8). The :local alias overrides them for monorepo dev.
+  io.github.kotoba-lang/jp-go-dds
+  {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system.git"
+   :git/sha "5bb780ceecf114bde20e8b264a27825ac95fe384"}
+  io.github.kotoba-lang/html
+  {:git/url "https://github.com/kotoba-lang/html.git"
+   :git/sha "aa57f2730c87b7c2752151ed1a5f2e402c2ac71e"}
+  io.github.kotoba-lang/css
+  {:git/url "https://github.com/kotoba-lang/css.git"
+   :git/sha "6eda5ee28ec177b9e09fdbee92c55a050b18cf7d"}}
+
+ :aliases
+ {:cljs {:extra-deps {thheller/shadow-cljs {:mvn/version "2.28.20"}}}
+
+  :local
+  {:override-deps
+   {io.github.kotoba-lang/jp-go-dds
+    {:local/root "../../kotoba-lang/jp-go-digital-design-system"}
+    io.github.kotoba-lang/html {:local/root "../../kotoba-lang/html"}
+    io.github.kotoba-lang/css {:local/root "../../kotoba-lang/css"}}}
+
+  :test
+  {:extra-paths ["test"]
+   :extra-deps {io.github.cognitect-labs/test-runner
+                {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+   :main-opts ["-m" "cognitect.test-runner"]
+   :exec-fn cognitect.test-runner.api/test}
+
+  :generate-site {:main-opts ["-m" "awai.apex.site"]}
+
+  :lint {:replace-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+         :main-opts ["-m" "clj-kondo.main" "--lint" "src" "test"
+                     "--fail-level" "error"]}}}

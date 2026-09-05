@@ -1,0 +1,10 @@
+.cpcache/
+.shadow-cljs/
+node_modules/
+public/assets/
+public/index.html
+dist/
+target/
+.nrepl-port
+.DS_Store
+e2e-shots/

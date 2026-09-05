@@ -1,0 +1,24 @@
+{:deps {:aliases [:cljs :local]}
+ :dev-http {8790 "public"}
+ :builds
+ {:app
+  {:target :browser
+   :output-dir "public/assets"
+   :asset-path "/assets"
+   :modules {:main {:init-fn oppai.gen.app/init}}
+   ;; Content-hashed filename. An unhashed `/assets/main.js` is a path a CDN
+   ;; or browser cache entry can outlive a deploy on — gftd.ai shipped a fresh
+   ;; index.html next to a 30-day-old bundle on 2026-08-01 and the new
+   ;; stylesheet landed on the old app. With the hash in the name the URL
+   ;; changes whenever the bytes do, so the stale entry is unreachable and a
+   ;; long immutable cache on assets becomes correct rather than dangerous.
+   :module-hash-names 8
+   :compiler-options {:output-feature-set :es2020
+                      :infer-externs :auto}}
+  ;; Cloudflare Worker (module syntax). Same :esm shape dev-yaoi and the
+  ;; cloud-murakumo site worker use.
+  :worker
+  {:target :esm
+   :output-dir "dist"
+   :modules {:worker {:exports {default oppai.gen.worker/default}}}
+   :compiler-options {:infer-externs :auto}}}}

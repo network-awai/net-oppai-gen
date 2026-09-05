@@ -1,0 +1,20 @@
+{
+  "name": "oppai-fans",
+  "private": true,
+  "description": "oppai.fans — R18 image/video generation on the murakumo Mac mini fleet, in the デジタル庁デザインシステム. Age-gated.",
+  "scripts": {
+    "dev": "shadow-cljs watch app",
+    "generate-site": "clojure -M:local:generate-site",
+    "test": "clojure -M:local:test",
+    "build": "shadow-cljs release app worker && npm run generate-site",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "shadow-cljs": "^2.28.20",
+    "wrangler": "^4.20.0"
+  }
+}

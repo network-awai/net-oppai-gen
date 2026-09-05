@@ -1,0 +1,84 @@
+;; Production smoke for oppai.fans. Unlike scripts/verify-e2e.cljs (which
+;; serves public/ statically and therefore has no /api/*), this drives the
+;; deployed Worker, so it can exercise the paths that need it: a real chat
+;; round-trip against the fleet, and the douga submit + poll loop.
+;;
+;;   npx nbb scripts/prod-smoke.cljs [https://oppai.fans] [screenshot-dir]
+;;
+;; It costs real fleet inference. Image generation is deliberately NOT
+;; exercised here — a render is 60-100s of GPU time and a smoke test should
+;; not spend that on every run; the studio's wiring is covered by verify-e2e.
+(ns prod-smoke
+  (:require ["playwright" :refer [chromium]]
+            ["node:fs" :as fs]
+            ["node:path" :as path]
+            [clojure.string :as str]
+            [promesa.core :as p]))
+
+(def base (or (first *command-line-args*) "https://oppai.fans"))
+(def shot-dir (or (second *command-line-args*) "e2e-shots/prod"))
+
+(def results (atom []))
+
+(defn check! [name ok? detail]
+  (swap! results conj {:ok (boolean ok?) :name name})
+  (println (if ok? "PASS -" "FAIL -") name (if detail (str "(" detail ")") "")))
+
+(defn -main []
+  (fs/mkdirSync shot-dir #js {:recursive true})
+  (-> (p/let [browser (.launch chromium #js {:channel "chromium" :headless true})
+              ctx (.newContext browser #js {:viewport #js {:width 1280 :height 900}})
+              page (.newPage ctx)
+              errs (atom [])
+              _ (.on page "pageerror" (fn [e] (swap! errs conj (str e))))
+              _ (.goto page base)
+              _ (.waitForSelector page ".oppai-tabs")
+
+              ;; --- chat: a real round-trip through the fleet ---------------
+              ta (.locator page ".oppai-composer-input textarea")
+              _ (.fill ta "「あわい」という言葉の意味を一文で説明してください。")
+              _ (.press ta "Enter")
+              _ (.waitForSelector page ".oppai-message.user")
+              ;; the assistant turn is the last message; wait for content
+              _ (.waitForFunction
+                 page
+                 "(() => { const m = document.querySelectorAll('.oppai-message.assistant .oppai-plain'); return m.length >= 2 && m[m.length-1].textContent.trim().length > 8; })()"
+                 nil #js {:timeout 120000})
+              reply (.evaluate page "(() => { const m = document.querySelectorAll('.oppai-message.assistant .oppai-plain'); return m[m.length-1].textContent; })()")
+              _ (.screenshot page #js {:path (path/join shot-dir "prod-chat.png")})
+
+              ;; --- douga: submit + first poll ------------------------------
+              _ (.click page "text=動画")
+              _ (.waitForSelector page "#douga-prompt")
+              _ (.fill page "#douga-prompt" "a calm blue wave at dawn")
+              _ (.click page "text=動画を生成")
+              _ (.waitForSelector page ".oppai-meter" #js {:timeout 60000})
+              status (.evaluate page "document.querySelector('.oppai-job').textContent")
+              _ (.screenshot page #js {:path (path/join shot-dir "prod-douga.png")})
+
+              ;; --- image picker is live -------------------------------------
+              _ (.click page "text=画像")
+              _ (.waitForFunction page "document.querySelectorAll('#image-model option').length > 0"
+                                  nil #js {:timeout 20000})
+              models (.evaluate page "Array.from(document.querySelectorAll('#image-model option')).map(o => o.value)")
+              _ (.screenshot page #js {:path (path/join shot-dir "prod-image.png")})]
+
+        (check! "chat returns a real reply from the fleet"
+                (> (count (str/trim (str reply))) 8)
+                (subs (str/trim (str reply)) 0 (min 60 (count (str/trim (str reply))))))
+        (check! "reply carries no <think> trace"
+                (not (str/includes? (str reply) "<think>")) nil)
+        (check! "douga job is accepted and polling"
+                (or (str/includes? (str status) "queued") (str/includes? (str status) "running"))
+                (str/trim (str status)))
+        (check! "image picker is live" (pos? (alength models)) (str (js->clj models)))
+        (check! "zero uncaught page errors" (empty? @errs) (str/join " | " (take 3 @errs)))
+        (.close browser))
+      (p/catch (fn [e] (check! "smoke completed" false (str e))))
+      (p/finally (fn []
+                   (let [fails (remove :ok @results)]
+                     (println "----")
+                     (println (count @results) "checks," (count fails) "failures")
+                     (when (seq fails) (js/process.exit 1)))))))
+
+(-main)
