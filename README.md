@@ -34,11 +34,17 @@
 ```bash
 npm install
 npm run dev          # shadow-cljs watch (http://localhost:8790)
-npm test             # clojure -M:local:test（41 tests / JVM、pure db 遷移を駆動）
-clojure -M:local:lint
+npm test             # nbb（41 tests / 162 assertions、JVM を起こさない）
+clojure -M:local:lint   # clj-kondo。ここだけまだ JVM（clj-kondo は nbb で走らない）
 npm run build        # release build + index.html 生成（hash 済 bundle 名）
 npm run deploy       # build → wrangler deploy (oppai.fans)
 ```
+
+`npm test` / `npm run generate-site` は nbb で走る（オーナー判断 2026-09-06、
+`clojure -M` を JVM-free な経路へ置換）。classpath は package.json に書いた
+相対パスで、monorepo の sibling checkout（`../../kotoba-lang/*`）を指す ——
+以前の `:local` alias と同じ前提。別の場所に置くなら
+`OPPAI_RESOURCE_PATH` で dds.css の resource root を上書きする。
 
 Secret（deploy 時に `wrangler secret put`。repo に置かない）:
 
