@@ -10,13 +10,52 @@
   `color-scheme: light`). There is no theme map here and no dark branch to
   keep in sync; do not add one.
 
-  Regenerate with `clojure -M:local:generate-site`."
-  (:require [css.core :as css]
+  Regenerate with `npm run generate-site` (nbb; no JVM).
+
+  Host I/O — reading the vendored stylesheet, reading the build manifest,
+  writing the pages — arrives through `install-io!` rather than a
+  node module require, so this namespace names no host module and stays
+  loadable in a browser build."
+  (:require [clojure.edn :as edn]
+            [css.core :as css]
             [oppai.gen.ui :as ui]
             [jp-go-dds.page :as dds-page]
             [jp-go-dds.tokens :as tokens]
-            #?(:clj [clojure.edn :as edn])
             #?(:clj [clojure.java.io :as io])))
+
+;; {:resource (fn [rel] text-or-nil) :file (fn [rel] text-or-nil)
+;;  :write! (fn [rel text])}, installed by a host with no classpath and no
+;; java.io — see scripts/node_io.cljs. On the JVM this stays nil and the
+;; classpath answers. (ClojureScript defonce takes no docstring, so this is a
+;; comment.)
+(defonce ^:private io-hooks (atom nil))
+
+(defn install-io!
+  "Install the host I/O hooks. Idempotent; last writer wins."
+  [hooks]
+  (reset! io-hooks hooks))
+
+(defn- read-resource
+  "Classpath resource as text, or nil."
+  [rel]
+  (if-let [f (:resource @io-hooks)]
+    (f rel)
+    #?(:clj (some-> (io/resource rel) slurp)
+       :cljs nil)))
+
+(defn- read-file
+  "Repo-relative file as text, or nil when it does not exist."
+  [rel]
+  (if-let [f (:file @io-hooks)]
+    (f rel)
+    #?(:clj (let [f (io/file rel)] (when (.exists f) (slurp f)))
+       :cljs nil)))
+
+(defn- write-file! [rel text]
+  (if-let [f (:write! @io-hooks)]
+    (f rel text)
+    #?(:clj (do (io/make-parents (io/file rel)) (spit (io/file rel) text))
+       :cljs (throw (ex-info "no :write! hook installed — call install-io!" {:path rel})))))
 
 (def page-title "oppai.fans — R18 画像・動画生成（成人向け）")
 
@@ -34,8 +73,8 @@
   "The vendored DADS bundle. `jp-go-dds.page` is pure by design and will not
   read it, so reading it is ours to do."
   []
-  #?(:clj (slurp (io/resource "jp_go_dds/dds.css"))
-     :cljs (throw (ex-info "dds-css is JVM-only (the shell is generated at build time)" {}))))
+  (or (read-resource "jp_go_dds/dds.css")
+      (throw (ex-info "jp_go_dds/dds.css not readable — is jp-go-dds on the classpath, or install-io! not called?" {}))))
 
 (def default-bundle-path
   "Only used when no build manifest exists yet (a fresh clone running the
@@ -56,12 +95,10 @@
                (str "/assets/"))
       default-bundle-path))
 
-#?(:clj
-   (defn bundle-path []
-     (let [f (io/file "public" "assets" "manifest.edn")]
-       (if (.exists f)
-         (bundle-path-from-manifest (edn/read-string (slurp f)))
-         default-bundle-path))))
+(defn bundle-path []
+  (if-let [txt (read-file "public/assets/manifest.edn")]
+    (bundle-path-from-manifest (edn/read-string txt))
+    default-bundle-path))
 
 (def layout-stylesheet
   "Layout plus the `oppai-*` primitives `oppai.gen.ui` had to build because a
@@ -745,8 +782,8 @@
 (defn render-html
   "The bundle src comes from the build manifest, so the HTML always points at
   the hash that was actually emitted."
-  ([] (render-html (dds-css) #?(:clj (bundle-path) :cljs default-bundle-path)))
-  ([css-text] (render-html css-text #?(:clj (bundle-path) :cljs default-bundle-path)))
+  ([] (render-html (dds-css) (bundle-path)))
+  ([css-text] (render-html css-text (bundle-path)))
   ([css-text bundle]
    (dds-page/->page
     {:title page-title
@@ -764,23 +801,20 @@
   [css-str]
   (count (re-seq #"#[0-9a-fA-F]{3,8}\b" css-str)))
 
-#?(:clj
-   (defn generate! []
-     (let [bundle (bundle-path)]
-       ;; Loud, because shipping the unhashed fallback is the failure this
-       ;; whole mechanism exists to prevent. `npm run deploy` builds first.
-       (when (= default-bundle-path bundle)
-         (println "WARNING: no public/assets/manifest.edn — falling back to"
-                  default-bundle-path
-                  "\n         run the release build BEFORE generating the shell,"
-                  "or the deploy ships a cache-vulnerable bundle path."))
-       (io/make-parents (io/file "public" "index.html"))
-       (spit (io/file "public" "index.html") (str (render-html (dds-css) bundle) "\n"))
-       (doseq [[_ model] model-pages]
-         (let [target (io/file "public" (:slug model) "index.html")]
-           (io/make-parents target)
-           (spit target (str (render-model-html model) "\n"))
-           (println "wrote" (.getPath target) "(DADS + washi LP)")))
-       (println "wrote public/index.html (DADS inlined, bundle" bundle ")"))))
+(defn generate! []
+  (let [bundle (bundle-path)]
+    ;; Loud, because shipping the unhashed fallback is the failure this
+    ;; whole mechanism exists to prevent. `npm run deploy` builds first.
+    (when (= default-bundle-path bundle)
+      (println "WARNING: no public/assets/manifest.edn — falling back to"
+               default-bundle-path
+               "\n         run the release build BEFORE generating the shell,"
+               "or the deploy ships a cache-vulnerable bundle path."))
+    (write-file! "public/index.html" (str (render-html (dds-css) bundle) "\n"))
+    (doseq [[_ model] model-pages]
+      (let [target (str "public/" (:slug model) "/index.html")]
+        (write-file! target (str (render-model-html model) "\n"))
+        (println "wrote" target "(DADS + washi LP)")))
+    (println "wrote public/index.html (DADS inlined, bundle" bundle ")")))
 
-#?(:clj (defn -main [& _args] (generate!)))
+(defn -main [& _args] (generate!))

@@ -4,8 +4,8 @@
   "description": "oppai.fans — R18 image/video generation on the murakumo Mac mini fleet, in the デジタル庁デザインシステム. Age-gated.",
   "scripts": {
     "dev": "shadow-cljs watch app",
-    "generate-site": "clojure -M:local:generate-site",
-    "test": "clojure -M:local:test",
+    "generate-site": "nbb --classpath src:test:scripts:../../kotoba-lang/jp-go-digital-design-system/src:../../kotoba-lang/html/src:../../kotoba-lang/css/src scripts/generate_site.cljs",
+    "test": "nbb --classpath src:test:scripts:../../kotoba-lang/jp-go-digital-design-system/src:../../kotoba-lang/html/src:../../kotoba-lang/css/src scripts/run_tests.cljs",
     "build": "shadow-cljs release app worker && npm run generate-site",
     "deploy": "npm run build && wrangler deploy"
   },

@@ -28,11 +28,17 @@
   "Remove `<think>…</think>` spans. Belt and braces next to
   `enable_thinking false`: the flag is honoured by the template, but a model
   can still emit the tags in-band, and leaking a reasoning trace into the
-  visible answer is both confusing and a privacy smell."
+  visible answer is both confusing and a privacy smell.
+
+  A negated-pair character class rather than the `(?s)` inline flag: `(?s)` is a Java construct
+  that JavaScript does not implement, so on the browser runtime the dot
+  stopped at the first newline and a multi-line trace leaked through with its
+  closing tag. The JVM-only test suite could not see that; the portable nbb
+  suite does (2026-09-06)."
   [text]
   (-> (str text)
-      (str/replace #"(?s)<think>.*?</think>" "")
-      (str/replace #"(?s)<think>.*" "")
+      (str/replace #"<think>[\s\S]*?</think>" "")
+      (str/replace #"<think>[\s\S]*" "")
       (str/replace #"^\s+" "")))
 
 (defn sse-payload

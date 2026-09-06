@@ -1,0 +1,27 @@
+(ns run-tests
+  "`npm test` — the portable suite, on nbb.
+
+  JVM-free replacement for the old `clojure -M:local:test`
+  (owner decision 2026-09-06). Same `.cljc` test namespaces the JVM runner
+  drove; `cljs.test` reports the same counts and exits non-zero on any
+  failure or error."
+  (:require [cljs.test :as t]
+            [node-io]
+            [oppai.gen.chat-test]
+            [oppai.gen.db-test]
+            [oppai.gen.fleet-test]
+            [oppai.gen.gate-test]
+            [oppai.gen.site-test]))
+
+(node-io/install!)
+
+;; cljs.test already prints the summary; this only carries the verdict out to
+;; the shell, so a red suite cannot exit 0.
+(defmethod t/report [:cljs.test/default :end-run-tests] [m]
+  (js/process.exit (if (t/successful? m) 0 1)))
+
+(t/run-tests 'oppai.gen.chat-test
+             'oppai.gen.db-test
+             'oppai.gen.fleet-test
+             'oppai.gen.gate-test
+             'oppai.gen.site-test)
