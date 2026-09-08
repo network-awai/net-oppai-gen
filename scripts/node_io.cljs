@@ -11,7 +11,7 @@
   alias pointed at, so a bare clone is no worse off than it was before."
   (:require ["fs" :as fs]
             ["path" :as path]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [oppai.gen.site :as site]))
 
 (def resource-roots

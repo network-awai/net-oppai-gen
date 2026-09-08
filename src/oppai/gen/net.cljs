@@ -18,7 +18,7 @@
     signed capability token which the browser must never hold."
   (:require [oppai.gen.chat :as chat]
             [oppai.gen.fleet :as fleet]
-            [clojure.string :as str]))
+            [kotoba.lang.text :as str]))
 
 (defonce ^:private chat-controller (atom nil))
 
