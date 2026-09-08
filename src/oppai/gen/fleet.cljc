@@ -13,7 +13,7 @@
   unreachable the picker must still offer something rather than render empty.
   It is explicitly marked `:fallback? true` so the UI can say so instead of
   pretending it knows."
-  (:require [clojure.string :as str]))
+  (:require [kotoba.lang.text :as str]))
 
 (def model-map-url "https://api.murakumo.cloud/infer/model-map")
 (def image-url "https://api.murakumo.cloud/v1/images/generations")
@@ -64,7 +64,7 @@
   (->> (str/split (str id) #"[-_]")
        (map (fn [part]
               (cond
-                (re-matches #"(?i)xl|sdxl|svd|ltx|vae|ti2v" part) (str/upper-case part)
+                (re-matches #"(?i)xl|sdxl|svd|ltx|vae|ti2v" part) (str/upper part)
                 (re-matches #"[0-9].*" part) part
                 :else (str/capitalize part))))
        (str/join " ")))

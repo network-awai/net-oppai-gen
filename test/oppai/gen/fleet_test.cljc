@@ -1,6 +1,6 @@
 (ns oppai.gen.fleet-test
   (:require [clojure.test :refer [deftest is testing]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [oppai.gen.fleet :as fleet]))
 
 (def sample-map

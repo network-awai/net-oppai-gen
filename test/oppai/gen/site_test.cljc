@@ -1,6 +1,6 @@
 (ns oppai.gen.site-test
   (:require [clojure.test :refer [deftest is]]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [oppai.gen.site :as site]
             [oppai.gen.ui :as ui]))
 

@@ -2,7 +2,7 @@
   "The chat wire, as pure functions: request body, SSE frame parsing, and the
   reasoning-trace strip. Portable so both runtimes and the tests agree on one
   implementation."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [oppai.gen.fleet :as fleet]))
 
 (def max-output-tokens

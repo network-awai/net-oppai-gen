@@ -2,7 +2,7 @@
   "The oppai.fans surface: three studios (チャット / 画像 / 動画) over one
   murakumo fleet, rendered in the デジタル庁デザインシステム through the single
   `oppai.gen.ui` seam. Presentation only — state lives in re-frame."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [oppai.gen.db :as db]
             [oppai.gen.fleet :as fleet]
             [oppai.gen.ui :as ui]
