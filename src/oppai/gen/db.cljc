@@ -1,7 +1,7 @@
 (ns oppai.gen.db
   "Portable app state: shape, defaults, and the pure transitions. Everything
   here runs identically on the JVM, which is what the tests drive."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [oppai.gen.fleet :as fleet]))
 
 (def tabs

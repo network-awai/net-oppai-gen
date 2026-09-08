@@ -19,7 +19,7 @@
 
   Colors are `var(--hig-*)`, which `jp-go-dds.tokens` re-defines on top of
   DADS primitives — the workspace-wide token contract, so no raw hex here."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [jp-go-dds.core :as dds]))
 
 ;; ---- hiccup plumbing --------------------------------------------------------
