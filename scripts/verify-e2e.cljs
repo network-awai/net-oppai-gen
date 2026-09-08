@@ -20,7 +20,7 @@
             ["node:http" :as http]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [promesa.core :as p]))
 
 (def port 8793)

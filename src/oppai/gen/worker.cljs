@@ -21,7 +21,7 @@
 
   Privacy: no prompt, completion or artifact is stored or logged here. This
   Worker is a pipe."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [goog.object :as gobj]))
 
 (def ^:private chat-upstream "https://api.murakumo.cloud/v1/chat/completions")

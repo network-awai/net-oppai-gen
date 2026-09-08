@@ -12,7 +12,7 @@
   (:require ["playwright" :refer [chromium]]
             ["node:fs" :as fs]
             ["node:path" :as path]
-            [clojure.string :as str]
+            [kotoba.lang.text :as str]
             [promesa.core :as p]))
 
 (def base (or (first *command-line-args*) "https://oppai.fans"))
