@@ -234,7 +234,7 @@
   [db model-id]
   (-> db
       (assoc-in [:image :model] (str model-id))
-      (assoc-in [:image :free?] (= "animagine-xl-4.0" (str model-id)))
+      (assoc-in [:image :free?] (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} (str model-id)))
       (assoc :tab :image)))
 
 ;; ---- face -------------------------------------------------------------------
@@ -337,14 +337,15 @@
 
 (defn free-image-result [db result]
   (let [url (:image result)
-        id (or (get-in result [:artifact :id]) (new-id "free"))]
+        id (or (get-in result [:artifact :id]) (new-id "free"))
+        model (if (= "waiREALMIX_v11" (:base_model result)) "waiREALMIX_v11" "animagine-xl-4.0")]
     (if-not (and (string? url) (str/starts-with? url "data:image/png;base64,iVBOR"))
       (image-failed db "生成結果を確認できませんでした。")
       (-> db
           (assoc-in [:image :status] :done)
-          (assoc-in [:image :model] "animagine-xl-4.0")
+          (assoc-in [:image :model] model)
           (assoc-in [:image :elapsed-ms] (* 1000 (or (:elapsed_seconds result) 0)))
           (assoc-in [:image :remaining] (:remaining result))
           (assoc-in [:image :job] {:job/id id :job/status :done :job/artifact-url url})
           (update :works conj {:id id :kind :image :prompt (get-in db [:image :prompt])
-                               :model "animagine-xl-4.0" :face? false :at (now-ms) :url url})))))
+                               :model model :face? false :at (now-ms) :url url})))))

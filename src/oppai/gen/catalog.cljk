@@ -142,7 +142,10 @@
 ;; Curated public works: only operator-generated samples explicitly cleared
 ;; for publication. The per-browser library is never read into this collection.
 (def public-works
-  [{:id "2b12b571-12dc-4770-bd08-ddd25716d539"
+  [{:id "wairealmix-garden-20260911" :title "春の庭" :image "/img/wairealmix-garden.png"
+    :model "waiREALMIX_v11" :width 768 :height 768
+    :sha256 "905e709c37335471a735ce48a9189957f617fe478be2ca43e3612cc32b39082b"}
+   {:id "2b12b571-12dc-4770-bd08-ddd25716d539"
     :title "青い時間の庭" :image "/img/free-garden.png" :model "animagine-xl-4.0"
     :sha256 "661e2043d5a8ad6ed4214049a2542e8444e4d8c8c75d78b3bbe95d8b8dbac869"
     :width 768 :height 768}])

@@ -139,7 +139,13 @@
 
      ;; ---- image -------------------------------------------------------------
 
-     (rf/reg-event-db :image/set (fn [db [_ k v]] (assoc-in db [:image k] v)))
+     (rf/reg-event-db :image/set
+                      (fn [db [_ k v]]
+                        (cond-> (assoc-in db [:image k] v)
+                          (and (= k :free?) v
+                               (not (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"}
+                                               (get-in db [:image :model]))))
+                          (assoc-in [:image :model] "animagine-xl-4.0"))))
      (rf/reg-event-db :image/preset (fn [db [_ id]] (db/apply-preset db id)))
      (rf/reg-event-fx :image/choose-model
                       (fn [{:keys [db]} [_ id]]
@@ -154,7 +160,7 @@
             (not (db/image-ready? db)) {:db db}
             (get-in db [:image :free?])
             {:db (db/begin-image db)
-             :fx [[:image/free {:prompt (get-in db [:image :prompt])
+             :fx [[:image/free {:model (get-in db [:image :model]) :prompt (get-in db [:image :prompt])
                                 :publication_consent "public-examples-v1"}]]}
             err {:db (db/image-failed db err)}
             :else {:db (db/begin-image db)

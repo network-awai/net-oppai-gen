@@ -229,3 +229,11 @@
     (is (= "animagine-xl-4.0" (:model (first (:works d)))))
     (is (= false (:face? (first (:works d)))))
     (is (= 4 (get-in d [:image :remaining])))))
+
+(deftest wairealmix-free-model-keeps-its-identity
+  (let [chosen (db/choose-model (db/initial-db) "waiREALMIX_v11")
+        done (db/free-image-result chosen {:base_model "waiREALMIX_v11"
+                                          :image "data:image/png;base64,iVBORtest"})]
+    (is (true? (get-in chosen [:image :free?])))
+    (is (= "waiREALMIX_v11" (get-in done [:image :model])))
+    (is (= "waiREALMIX_v11" (:model (first (:works done)))))))

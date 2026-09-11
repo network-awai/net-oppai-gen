@@ -163,15 +163,21 @@
            ready? @(rf/subscribe [:image-ready?])
            busy? (= :running status)
            free? (:free? image)
-           card (catalog/card-by-id (if free? "animagine-xl-4.0" model))
+           card (catalog/card-by-id model)
            set-str (fn [k] (fn [e] (rf/dispatch [:image/set k (.. e -target -value)])))]
        [:section {:class "oppai-studio oppai-image" :aria-label "画像生成"}
         [:div {:class "oppai-form"}
          [:div {:class "oppai-note"}
           [:strong "基本の画像生成は無料"]
-          [:p "Animagine XL 4.0 · 768×768 · 同じネットワークから1日5回。混雑時は時間をおいてお試しください。"]]
+          [:p "Animagine XL 4.0 / waiREALMIX_v11 · 768×768 · 同じネットワークから1日5回。混雑時は時間をおいてお試しください。"]]
          (dds-checkbox "image-free" "無料で生成する" free? busy?
                        #(rf/dispatch [:image/set :free? (.. % -target -checked)]))
+         (when free?
+           (ui/field {:label "無料モデル" :for "free-image-model"}
+                     (ui/select {:id "free-image-model" :value model :disabled busy?
+                                 :class "oppai-full" :on-change (set-str :model)}
+                                [["animagine-xl-4.0" "Animagine XL 4.0"]
+                                 ["waiREALMIX_v11" "waiREALMIX_v11"]])))
          (when-not free? (preset-row))
          (ui/field {:label "プロンプト" :for "image-prompt"
                     :support (if (= :tags (:prompt-style card))
@@ -228,7 +234,7 @@
           [:figure {:class "oppai-result"}
            [:img {:src url :alt (str "生成された画像: " prompt)}]
            [:figcaption {:class "oppai-note"}
-            (str (if free? "animagine-xl-4.0 · 無料" (or (:name card) model))
+            (str (str (or (:name card) model) (when free? " · 無料"))
                  (when elapsed-ms (str " · " (int (/ elapsed-ms 1000)) " 秒"))
                  (when (and (not free?) (:face-ref? image)) " · 自分の顔"))
             " · "
