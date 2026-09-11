@@ -19,9 +19,12 @@
 (def env #js {:OPPAI_DB d1 :OPPAI_PREVIEW_SPONSOR_TOKEN "test-only-secret"})
 (def sent (atom []))
 (set! (.-fetch js/globalThis)
-      (fn [_ init]
+      (fn [target init]
         (swap! sent conj (js->clj (.-headers init)))
-        (js/Promise.resolve (js/Response. "{\"error\":{\"code\":\"daily_limit\",\"message\":\"quota\"}}" #js {:status 429}))))
+        (js/Promise.resolve
+         (if (.includes target "/preview/video")
+           (js/Response. "{\"status\":\"done\",\"artifactUrl\":\"/api/v1/preview/video/jobs/9cd52d7c-8727-4f96-aa96-df891fe03caf/artifact\"}")
+           (js/Response. "{\"error\":{\"code\":\"daily_limit\",\"message\":\"quota\"}}" #js {:status 429})))))
 (defn request [path body ip]
   (js/Request. (str "https://oppai.fans" path)
                #js {:method "POST" :headers #js {"origin" "https://oppai.fans" "content-type" "application/json" "cf-connecting-ip" ip "x-preview-network" "forged"}
@@ -41,6 +44,8 @@
                    (.then #(call! worker "/api/feedback" (assoc valid :message (apply str (repeat 9000 "x"))) "192.0.2.2" 503))
                    (.then #(call! worker "/api/free/image" free "192.0.2.1" 429))
                    (.then (fn [body] (assert/match (.-request_id body) #"^[a-f0-9-]{36}$") (call! worker "/api/free/image" free "192.0.2.2" 429)))
+                   (.then (fn [_] (call! worker "/api/free/video" {:model "10eros-max"} "192.0.2.1" 200)))
+                   (.then (fn [body] (assert/equal (.-artifactUrl body) "/api/free/video/jobs/9cd52d7c-8727-4f96-aa96-df891fe03caf/artifact")))
                    (.then (fn [_]
                             (assert/notEqual (get (first @sent) "x-preview-network") (get (second @sent) "x-preview-network"))
                             (assert/match (get (first @sent) "x-preview-network") #"^[a-f0-9]{64}$")
