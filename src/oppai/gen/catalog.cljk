@@ -142,8 +142,8 @@
 ;; Curated public works: only operator-generated samples explicitly cleared
 ;; for publication. The per-browser library is never read into this collection.
 (def public-works
-  [{:id "producer-character-20260911" :producer "producer" :title "山あいの旅人" :image "/img/producer-character-20260911.png" :model "animagine-xl-4.0" :width 768 :height 768 :sha256 "4c2db1c139943853e860e5b0255a72cd8efaadfd20588d52d957e13cff58aa45"}
-   {:id "producer-portrait-20260911" :producer "producer" :title "窓辺のポートレート" :image "/img/producer-portrait-20260911.png" :model "waiREALMIX_v11" :width 768 :height 768 :sha256 "6fa9499dd71c8ecc39d2ff165a4c6f059484b54bf9cd212ad0c19bf894a61016"}
+  [{:id "producer-character-20260911" :prompt "masterpiece, best quality, 1woman, adult woman age 28, original fantasy adventurer character, fully clothed, elegant navy traveling coat, leather gloves, silver hair, confident smile, waist-up portrait, mountain village background, anime illustration, no text" :producer "producer" :title "山あいの旅人" :image "/img/producer-character-20260911.png" :model "animagine-xl-4.0" :width 768 :height 768 :sha256 "4c2db1c139943853e860e5b0255a72cd8efaadfd20588d52d957e13cff58aa45"}
+   {:id "producer-portrait-20260911" :prompt "Editorial portrait photograph of a fictional 30 year old man, fully clothed in a charcoal turtleneck and tailored jacket, natural face, soft window light, warm studio background, head and shoulders composition, no text" :producer "producer" :title "窓辺のポートレート" :image "/img/producer-portrait-20260911.png" :model "waiREALMIX_v11" :width 768 :height 768 :sha256 "6fa9499dd71c8ecc39d2ff165a4c6f059484b54bf9cd212ad0c19bf894a61016"}
    {:id "wairealmix-garden-20260911" :title "春の庭" :image "/img/wairealmix-garden.png"
     :model "waiREALMIX_v11" :width 768 :height 768
     :sha256 "905e709c37335471a735ce48a9189957f617fe478be2ca43e3612cc32b39082b"}

@@ -15,15 +15,17 @@
    {:id :producer :label "Producer" :icon "✦" :fragment "producer"}
    {:id :posts :label "投稿" :icon "▧" :fragment "posts"}
    {:id :payments :label "決済" :icon "◇" :fragment "payments"}
+   {:id :model-detail :label "モデル詳細" :fragment "model" :nav? false}
+   {:id :post-detail :label "作品詳細" :fragment "post" :nav? false}
    {:id :image :label "画像作成" :icon "▣" :fragment "image" :nav? false}
    {:id :douga :label "動画作成" :icon "▶" :fragment "douga" :nav? false}
    {:id :face :label "自分の顔" :icon "◉" :fragment "face" :nav? false}
    {:id :chat :label "チャット" :icon "◇" :fragment "chat" :nav? false}])
 
-(def default-view :models)
+(def default-view :home)
 
 (defn fragment->view [fragment]
-  (let [f (str/replace (str fragment) #"^#" "")]
+  (let [f (first (str/split (str/replace (str fragment) #"^#" "") #"/"))]
     (or (some #(when (= f (:fragment %)) (:id %)) views)
         default-view)))
 
@@ -32,3 +34,6 @@
                (:fragment (first (filter #(= default-view (:id %)) views))))))
 
 (defn view? [x] (boolean (some #(= x (:id %)) views)))
+
+(defn detail-id [fragment]
+  (second (str/split (str/replace (str fragment) #"^#" "") #"/")))

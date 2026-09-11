@@ -209,3 +209,14 @@ A Codex daily automation is planned for 09:00 Asia/Tokyo (pending approval of re
 review one character and one portrait, publish only successful reviewed works,
 and verify the deployed site. It uses free quotas only and never falls back
 to payment. This schedule runs through Codex; it is not a Worker cron.
+
+
+### Discovery and detail navigation
+
+The default home now separates tools, models and recent posts. Post pages at
+`#post/<id>` link to their exact model at `#model/<id>` and to Producer.
+Only the two operator-owned Producer sample prompts are published for remix;
+private user prompts are never added to the public catalog. Remix requires
+fresh publication consent and clears face references. Model covers use exact
+checkpoint samples; models without samples are labeled accordingly. Posts
+support anime/realistic filters. Hash navigation preserves browser history.
