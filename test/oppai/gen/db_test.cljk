@@ -51,8 +51,8 @@
 (deftest fleet-load-picks-a-default-image-model-but-does-not-override-a-choice
   (let [parsed (fleet/parse-image-models node-models)
         d (db/fleet-loaded (db/initial-db) parsed)]
-    (is (= "waiREALMIX_v11" (get-in d [:image :model]))
-        "the catalog's first available explicit card, not the node's alphabetical first")
+    (is (= "animagine-xl-4.0" (get-in d [:image :model]))
+        "honor the generation service default, not the editorial card order")
     (is (= "comfyui" (get-in d [:fleet :image-source])))
     (is (= ["plus-face" "faceid"] (get-in d [:fleet :face-modes])))
     (is (db/face-available? d))
@@ -69,7 +69,7 @@
                                                   (fleet/parse-image-models (assoc node-models :faceModes []))))))))
 
 (deftest tabs-come-from-the-route-table
-  (is (= route/views db/tabs))
+  (is (= (remove #(false? (:nav? %)) route/views) db/tabs))
   (is (= :models (:tab (db/set-tab (db/initial-db) :models))))
   (is (= route/default-view (:tab (db/set-tab (db/initial-db) :nope)))))
 

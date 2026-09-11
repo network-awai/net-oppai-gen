@@ -38,8 +38,8 @@
 (def fallback-image-models
   "Used only when the live map cannot be read. Sourced from the fleet registry
   (kotoba-lang/murakumo `infer.edn`), not invented."
-  [{:model-id "animagine-xl-4.0" :label "Animagine XL 4.0" :fallback? true}
-   {:model-id "wai-illustrious-sdxl-v150" :label "WAI Illustrious SDXL v1.5" :fallback? true}])
+  [{:model-id "animagine-xl-4.0" :label "animagine-xl-4.0" :fallback? true}
+   {:model-id "wai-illustrious-sdxl-v150" :label "wai-illustrious-sdxl-v150" :fallback? true}])
 
 (def video-models
   "Douga models live on the generation job API (gad), which keeps its own
@@ -57,18 +57,6 @@
     :label "Wan Dancer 14B"
     :hint "ダンス i2v。重みの取得待ちで失敗することがあります"}])
 
-(defn- humanize
-  "`animagine-xl-4.0` -> `Animagine XL 4.0`-ish. A label, not an identity —
-  `:model-id` stays the wire value."
-  [id]
-  (->> (str/split (str id) #"[-_]")
-       (map (fn [part]
-              (cond
-                (re-matches #"(?i)xl|sdxl|svd|ltx|vae|ti2v" part) (str/upper part)
-                (re-matches #"[0-9].*" part) part
-                :else (str/capitalize part))))
-       (str/join " ")))
-
 (defn parse-model-map
   "Fleet map JSON (already keywordized) -> what the pickers need.
 
@@ -83,7 +71,7 @@
                        (group-by :model-id)
                        (map (fn [[id entries]]
                               {:model-id id
-                               :label (humanize id)
+                               :label (str id)
                                :nodes (vec (sort (map :node entries)))
                                :checkpoint (:checkpoint (first entries))
                                :queue (reduce + 0 (keep :queue entries))
@@ -121,7 +109,7 @@
   offering LTX as an image model is a ComfyUI error the visitor cannot read."
   [m]
   (let [models (->> (or (:models m) [])
-                    (map (fn [{:keys [id file]}] {:model-id (str id) :label (humanize id)
+                    (map (fn [{:keys [id file]}] {:model-id (str id) :label (str id)
                                                   :checkpoint file :nodes [] :queue 0 :exact? true}))
                     (remove #(re-find not-image-checkpoints (:model-id %)))
                     (sort-by :model-id)

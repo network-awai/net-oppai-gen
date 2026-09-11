@@ -35,9 +35,14 @@
   (let [detail (or (get-in body [:error :message])
                    (:error body)
                    (:message body))]
-    (if (seq (str detail))
-      (str detail " (HTTP " status ")")
-      (str "リクエストが失敗しました (HTTP " status ")"))))
+    (cond
+      (= detail "insufficient credits")
+      (str "運営側の生成クレジットが不足しています（必要 " (:cost body)
+           " / 残高 " (:balance body) "）。補充後に再試行してください。")
+      (= detail "model has no published price — refusing to quote")
+      "このモデルは生成料金が未登録です。現在は Animagine XL 4.0 を選択してください。"
+      (seq (str detail)) (str detail " (HTTP " status ")")
+      :else (str "リクエストが失敗しました (HTTP " status ")"))))
 
 (defn- fetch-json!
   [url {:keys [method body on-ok on-error]}]

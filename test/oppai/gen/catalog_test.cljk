@@ -42,3 +42,10 @@
       (is (= "waiREALMIX_v11" (catalog/default-model ["animagine-xl-4.0" "waiREALMIX_v11"])))))
   (testing "nothing available: the first card is still a default"
     (is (= (:id (first (catalog/with-availability []))) (catalog/default-model [])))))
+
+(deftest search-composes-with-style-and-availability
+  (let [items (catalog/with-availability ["waiREALMIX_v11"])]
+    (is (= ["waiREALMIX_v11"] (mapv :id (catalog/filter-cards items "  REALMIX  " :all false))))
+    (is (empty? (catalog/filter-cards items "REALMIX" :anime false)))
+    (is (= 1 (count (catalog/filter-cards items "" :all true))))
+    (is (empty? (catalog/filter-cards (catalog/with-availability nil) "" :all true)))))
