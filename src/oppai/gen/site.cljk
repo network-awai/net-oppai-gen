@@ -25,7 +25,7 @@
 
 ;; {:resource (fn [rel] text-or-nil) :file (fn [rel] text-or-nil)
 ;;  :write! (fn [rel text])}, installed by a host with no classpath and no
-;; java.io — see scripts/node_io.cljs. On the JVM this stays nil and the
+;; java.io — see scripts/node_io.cljk. On the JVM this stays nil and the
 ;; classpath answers. (ClojureScript defonce takes no docstring, so this is a
 ;; comment.)
 (defonce ^:private io-hooks (atom nil))
