@@ -1,0 +1,174 @@
+(ns oppai.gen.bot-test
+  "The studio bot's boundary, determinism, placement and quality — pinned.
+
+  The profile under test is the real `bots/oppai-studio.edn`, read from disk:
+  a test against a toy profile would pass while the shipped one names a
+  minor. Reader-only under nbb (`fs`), no `install-io!` needed."
+  (:require [clojure.test :refer [deftest is testing]]
+            [cljs.reader :as reader]
+            ["fs" :as fs]
+            [kotoba.lang.text :as str]
+            [oppai.gen.bot :as bot]
+            [oppai.gen.guard :as guard]))
+
+(def profile
+  (reader/read-string (fs/readFileSync "bots/oppai-studio.edn" "utf8")))
+
+(def lanes (map :lane/id (:bot/lanes profile)))
+
+(deftest the-shipped-profile-validates
+  (let [[p problems] (bot/validate-profile profile)]
+    (is (nil? problems) (pr-str problems))
+    (is (= "oppai-studio" (:bot/id p)))))
+
+(deftest validate-refuses-a-bank-that-names-a-minor
+  (let [bad (update-in profile [:bot/banks :look] conj {:tags "loli, small" :natural "a young girl"})
+        [p problems] (bot/validate-profile bad)]
+    (is (nil? p))
+    (is (some #(str/includes? % "names a minor") problems) (pr-str problems))))
+
+(deftest validate-refuses-a-bank-that-hits-a-forbidden-term
+  (let [bad (update-in profile [:bot/banks :act] conj {:tags "forced, crying" :natural "forced against her will"})
+        [p problems] (bot/validate-profile bad)]
+    (is (nil? p))
+    (is (some #(str/includes? % "forbidden term") problems) (pr-str problems))))
+
+(deftest validate-refuses-a-node-claimed-twice
+  (let [bad (update-in profile [:bot/lanes 1] assoc :lane/nodes ["benjamin"])
+        [_ problems] (bot/validate-profile bad)]
+    (is (some #(str/includes? % "claimed by more than one lane") problems) (pr-str problems))))
+
+(deftest validate-refuses-an-empty-adult-marker-list
+  (let [[_ problems] (bot/validate-profile (assoc-in profile [:bot/policy :adult-markers] []))]
+    (is (some #(str/includes? % "adult-markers") problems))))
+
+;; ---- boundary on composed output ------------------------------------------------
+
+(deftest forbidden-matching-is-whole-token-for-words-and-substring-for-phrases
+  (let [f (get-in profile [:bot/policy :forbidden])]
+    (is (nil? (bot/forbidden-hit f "sex, from behind, doggystyle, ass grab")) "dog must not fire on doggystyle")
+    (is (= "dog" (bot/forbidden-hit f "a woman with a dog")))
+    (is (= "mind control" (bot/forbidden-hit f "under mind control, blank eyes")))
+    (is (nil? (bot/forbidden-hit f "mind, control")) "the phrase, not its words")
+    (testing "boundary: the term as the whole text"
+      (is (= "rape" (bot/forbidden-hit f "rape")))
+      (is (nil? (bot/forbidden-hit f "grape"))))))
+
+(deftest every-composed-prompt-for-every-lane-passes-the-boundary-and-names-an-adult
+  (doseq [lane-id lanes
+          n (range 40)
+          :let [job (bot/compose profile lane-id n)
+                text (or (:prompt job) (:text job))]
+          :when text]
+    (is (not (guard/minor? text)) (str lane-id " n=" n ": " text))
+    (is (nil? (bot/forbidden-hit (get-in profile [:bot/policy :forbidden]) text)) (str lane-id " n=" n ": " text))
+    (when (:prompt job)
+      (is (bot/adult-marked? profile text) (str lane-id " n=" n " carries no adult marker: " text)))))
+
+(deftest composed-image-jobs-are-the-shape-the-guard-accepts
+  (doseq [lane-id [:real-mix :real-cn :anime]
+          n [0 1 2 13]
+          :let [job (bot/compose profile lane-id n)
+                [body reason] (guard/image-job {:prompt (:prompt job) :model (:model job)
+                                                :size (str (:width job) "x" (:height job))
+                                                :negative (:negative job) :seed (:seed job)
+                                                :steps (:steps job)})]]
+    (is (nil? reason) (str lane-id " n=" n ": " reason))
+    (is (= (:model job) (get-in body [:params :model])))
+    (testing "the negative carries the guard's minor exclusion and the profile floor"
+      (is (str/includes? (:negative job) guard/minor-negative))
+      (is (str/includes? (:negative job) "school uniform")))))
+
+(deftest the-explicit-banks-are-reachable
+  (testing "owner request 2026-09-11: ahegao and bukkake are in the vocabulary and get composed"
+    (let [acts (map :tags (get-in profile [:bot/banks :act]))]
+      (is (some #(str/includes? % "ahegao") acts))
+      (is (some #(str/includes? % "bukkake") acts)))
+    (let [prompts (map #(:prompt (bot/compose profile :anime %)) (range 60))]
+      (is (some #(str/includes? % "ahegao") prompts))
+      (is (some #(str/includes? % "bukkake") prompts)))))
+
+(deftest composition-is-deterministic-and-seeds-do-not-collide-across-lanes
+  (is (= (bot/compose profile :real-mix 3) (bot/compose profile :real-mix 3)))
+  (is (not= (:prompt (bot/compose profile :real-mix 3)) (:prompt (bot/compose profile :real-mix 4))))
+  (let [seeds (for [l lanes n (range 20)] (bot/job-seed profile l n))]
+    (is (= (count seeds) (count (set seeds))) "a seed identifies one (lane, n)")))
+
+(deftest tag-lanes-get-tags-and-natural-lanes-get-sentences
+  (let [anime (:prompt (bot/compose profile :anime 0))
+        real (:prompt (bot/compose profile :real-mix 0))]
+    (is (str/starts-with? anime "masterpiece"))
+    (is (str/includes? anime "1girl, "))
+    (is (str/includes? real "photo of a woman ("))
+    (is (not (str/includes? real "1girl")))))
+
+(deftest compose-refuses-when-the-banks-are-poisoned
+  ;; validate-profile is the first line; compose is the second, and it must
+  ;; not depend on the first having been called.
+  (let [poisoned (assoc-in profile [:bot/banks :scene] [{:tags "classroom, desks" :natural "in a classroom"}])]
+    (is (thrown? js/Error (bot/compose poisoned :anime 0)))))
+
+;; ---- placement ------------------------------------------------------------------
+
+(deftest placement-covers-the-whole-fleet-once
+  (let [nodes (mapcat :lane/nodes (:bot/lanes profile))
+        fleet #{"naphtali" "simeon" "judah" "zebulun" "levi" "joseph" "issachar" "dan" "benjamin" "asher" "gad"}]
+    (is (= fleet (set nodes)) "every one of the 11 nodes has a lane")
+    (is (= (count nodes) (count (set nodes))) "and only one")))
+
+(deftest placement-matches-fleet-declaration
+  ;; kotoba-lang/murakumo fleet.edn :node/serves, 2026-09-11. When the fleet is
+  ;; re-declared this table is what turns red.
+  (let [declared {"benjamin" "waiREALMIX_v11.safetensors" "simeon" "waiREALMIX_v11.safetensors"
+                  "dan" "waiREALCN_v150.safetensors" "joseph" "waiREALCN_v150.safetensors"
+                  "zebulun" "waiIllustriousSDXL_v150.safetensors"
+                  "naphtali" "ltxv-2b-0.9.6-distilled-04-25.safetensors" "issachar" "ltxv-2b-0.9.6-distilled-04-25.safetensors"
+                  "asher" "svd_xt.safetensors" "judah" "qwen3-tts" "levi" "qwen3-tts" "gad" "10eros-max"}]
+    (doseq [l (:bot/lanes profile) n (:lane/nodes l)]
+      (is (= (declared n) (or (:lane/checkpoint l) (:lane/model l))) (str n " is declared for " (declared n))))))
+
+(deftest assign-picks-the-least-loaded-node-under-the-cap
+  (is (= "simeon" (bot/assign profile :real-mix {"benjamin" 1 "simeon" 0})))
+  (is (= "benjamin" (bot/assign profile :real-mix {"benjamin" 0 "simeon" 0})) "ties by lane order")
+  (testing "boundary: the cap itself is full"
+    (let [cap (get-in profile [:bot/schedule :per-node-queue-max])]
+      (is (nil? (bot/assign profile :real-mix {"benjamin" cap "simeon" cap})))
+      (is (= "simeon" (bot/assign profile :real-mix {"benjamin" cap "simeon" (dec cap)})))))
+  (testing "an unmeasured node is never picked"
+    (is (nil? (bot/assign profile :real-mix {})))
+    (is (= "simeon" (bot/assign profile :real-mix {"simeon" 0})))))
+
+(deftest node->lane-round-trips
+  (is (= :anime (:lane/id (bot/node->lane profile "zebulun"))))
+  (is (nil? (bot/node->lane profile "xavier"))))
+
+;; ---- quality ----------------------------------------------------------------------
+
+(deftest quality-floors-fail-and-pass-and-refuse-to-guess
+  (let [floor (get-in profile [:bot/output :quality :image :min-bytes])]
+    (is (= :pass (:verdict (bot/quality profile {:kind :image :bytes (inc floor) :width 832 :height 1216}))))
+    (is (= :fail (:verdict (bot/quality profile {:kind :image :bytes (dec floor) :width 832 :height 1216}))))
+    (testing "boundary: exactly the floor passes"
+      (is (= :pass (:verdict (bot/quality profile {:kind :image :bytes floor :width 832 :height 1216})))))
+    (is (= :unmeasured (:verdict (bot/quality profile {:kind :image :bytes (inc floor)}))) "no dimensions")
+    (is (= :unmeasured (:verdict (bot/quality profile {:kind :image}))) "no bytes")
+    (is (= :unmeasured (:verdict (bot/quality profile {:kind :hologram :bytes 1}))) "no floor")
+    (is (= :fail (:verdict (bot/quality profile {:kind :image :bytes (inc floor) :width 256 :height 1216}))) "short side")
+    (is (= :fail (:verdict (bot/quality profile {:kind :audio :bytes 30000 :seconds 0.5}))))
+    (is (= :pass (:verdict (bot/quality profile {:kind :audio :bytes 30000 :seconds 2.0}))))))
+
+;; ---- graphs -----------------------------------------------------------------------
+
+(deftest graphs-carry-the-job-verbatim
+  (let [job (bot/compose profile :real-mix 5)
+        g (bot/graph job "oppai-real-mix")]
+    (is (= (:checkpoint job) (get-in g ["1" :inputs :ckpt_name])))
+    (is (= (:prompt job) (get-in g ["2" :inputs :text])))
+    (is (= (:negative job) (get-in g ["3" :inputs :text])))
+    (is (= (:seed job) (get-in g ["5" :inputs :seed])))
+    (is (= "oppai-real-mix" (get-in g ["7" :inputs :filename_prefix]))))
+  (let [job (bot/compose profile :video-ltx 1)
+        g (bot/graph job "oppai-ltx")]
+    (is (= 73 (get-in g ["4" :inputs :length])) "24fps x 3s -> 8k+1 = 73 frames")
+    (is (= "ltxv" (get-in g ["9" :inputs :type]))))
+  (is (nil? (bot/graph (bot/compose profile :voice 0) "x")) "tts is not a ComfyUI graph"))

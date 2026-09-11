@@ -68,6 +68,45 @@
 ない。公開・共有・アカウント（SIWE + Passkey）・クレジット（x402/USDC）は
 次の段（superproject ADR-2609111130 の gap 表）。
 
+## studio bot — 11 台を 24 時間回す生成 bot（2026-09-11、ADR-2609117000）
+
+`bots/oppai-studio.edn` が bot の **profile**（どの lane をどのノードで、どの語彙で、
+どこまで明示的に、何を絶対に描かないか）。`oppai.gen.bot` が pure な半分
+（validate / compose / assign / quality / graph）、`scripts/oppai_studio_tick.cljk`
+が I/O の半分（ssh → ノードの ComfyUI loopback、mlx-audio CLI、gad の generation API
+loopback、receipt ledger）。**モデルは呼ばない** —— prompt は seeded PRNG で bank から
+組み、`oppai.gen.guard/minor?` と profile の `:forbidden` を、他人が書いた prompt と
+同じ扱いで通す。adult marker を持たない prompt は組めない（throw）。
+
+| lane | model | nodes | kind |
+|---|---|---|---|
+| `:real-mix` | waiREALMIX_v11 | benjamin, simeon | txt2img（SDXL、写実） |
+| `:real-cn` | waiREALCN_v150 | dan, joseph | txt2img（SDXL、写実・アジア系） |
+| `:anime` | waiIllustriousSDXL_v150 | zebulun | txt2img（Danbooru タグ） |
+| `:video-ltx` | ltxv-2b-0.9.6-distilled | naphtali, issachar | t2v 3 s |
+| `:video-svd` | svd_xt | asher | i2v（pass した静止画から） |
+| `:voice` | Qwen3-TTS 1.7B (mlx-audio, ono_anna) | judah, levi | 日本語の短い台詞 |
+| `:eros-h3` | 10Eros-Max（MiniMax-H3 finetune） | gad | ref2va 動画、generation API 経由 |
+
+fleet 側の宣言は `kotoba-lang/murakumo` の `fleet.edn` `:node/serves`（同日、16 GiB mini
+10 台から text 推論を退避）。lane ↔ node の対応は
+`test/oppai/gen/bot_test.cljk` の `placement-matches-fleet-declaration` が pin する。
+
+```bash
+npm run bot:tick -- --dry-run          # 何を投げるかだけ（fleet に触らない）
+npm run bot:tick -- --only benjamin    # 1 ノードだけ
+npm run bot:tick                       # 1 tick（collect → submit → receipts）
+npm run bot:tick -- --report           # ledger の集計
+```
+
+状態は `~/.itonami/oppai-studio/`（`receipts.edn` は append-only の測定列）。
+loop は `deploy/network.awai.bot.oppai-studio.plist`（5 分毎、install 手順は plist 内）。
+生成物は**候補**で、`catalog/public-works` への昇格は人が行う（`:promote :manual`）。
+
+実測 2026-09-11（初回 tick）: SDXL 832×1216 / 26 steps は 16 GiB M4 で **165 s/枚**
+（cold、`Unloaded partially` を含む）。Qwen3-TTS は 4.4 s の台詞を 8 s（cold load 込み）。
+**ここに書いた値は当日の値**であって定数ではない —— `--report` が今日の値を持つ。
+
 ## 開発
 
 **source は `.cljk` が正本**（2026-09-11、adr-2609111500-cljk-rename-all-clojure-source、

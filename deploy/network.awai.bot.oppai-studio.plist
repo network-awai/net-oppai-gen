@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  network.awai.bot.oppai-studio — the oppai.fans studio bot loop
+  (com-junkawasaki/root ADR-2609117000).
+
+  Every 5 minutes: collect what the fleet finished, keep every node's ComfyUI
+  queue at the profile's cap, run the audio lines, write receipts. No model
+  is consulted (`claude -p` is never called); prompts are composed from
+  bots/oppai-studio.edn and pass the same guard the Worker enforces.
+
+  Install (operator Mac, the one with ssh to the fleet):
+    cp orgs/network-awai/fans-oppai/deploy/network.awai.bot.oppai-studio.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/network.awai.bot.oppai-studio.plist
+    launchctl kickstart -k gui/$(id -u)/network.awai.bot.oppai-studio
+  Verify it loaded THIS definition (a bootstrap that returns is not proof):
+    launchctl print gui/$(id -u)/network.awai.bot.oppai-studio | grep -E 'state|program|stdout'
+  Unload:
+    launchctl bootout gui/$(id -u)/network.awai.bot.oppai-studio
+
+  State and artifacts: ~/.itonami/oppai-studio/ (receipts.edn is append-only).
+  lock: ~/.itonami/oppai-studio/tick.lock (a tick that finds a fresh lock exits 2).
+-->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>COM_JUNKAWASAKI_ROOT</key>
+		<string>/Users/junkawasaki/github/com-junkawasaki</string>
+		<key>HOME</key>
+		<string>/Users/junkawasaki</string>
+		<key>LOGNAME</key>
+		<string>junkawasaki</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+		<key>SHELL</key>
+		<string>/bin/zsh</string>
+		<key>USER</key>
+		<string>junkawasaki</string>
+		<key>OPPAI_RESOURCE_PATH</key>
+		<string>/Users/junkawasaki/github/com-junkawasaki/orgs/kotoba-lang/jp-go-digital-design-system/resources</string>
+	</dict>
+	<key>Label</key>
+	<string>network.awai.bot.oppai-studio</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-lc</string>
+		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; exec npm run --silent bot:tick</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/junkawasaki/.itonami/oppai-studio/tick.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/junkawasaki/.itonami/oppai-studio/tick.log</string>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/junkawasaki/github/com-junkawasaki/orgs/network-awai/fans-oppai</string>
+</dict>
+</plist>
