@@ -123,3 +123,28 @@ src/oppai/gen/
 test/oppai/gen/         nbb tests（gate / db / fleet / chat / site / guard / catalog / route）
 scripts/                E2E・prod smoke
 ```
+
+## Payments and dark default (2026-09-11)
+
+The HTML itself selects dark, including browser color-scheme/theme-color,
+so OS light mode and JavaScript startup no longer cause a light first paint.
+The `#payments` view reads `/api/payments`. That endpoint fetches Murakumo's
+live x402 offer, accepts only the Base-mainnet USDC v2 chat offer facilitated
+by `https://x402.nexus`, and links to the existing Murakumo hosted checkout.
+Wallet approval, settlement and the inference result remain on that checkout.
+Discovery failure hides the checkout link; it never fabricates a price.
+
+This is a hosted **text inference payment** integration, not image-credit
+fulfillment. A settled text request must never increment an image balance.
+No funds were transferred during verification.
+
+Top-up investigation: Murakumo's `/api/store/checkout` responds, and its
+Stripe webhook maps paid credit SKUs through `metadata.did` to
+`/itonami/topup`. The generation gateway currently bills our service identity
+`oppai-fans`; this site has no authenticated purchaser account or verified
+mapping from checkout DID to that identity. The public x402 offer contains
+chat/infer-memory resources, not image generation or a credit top-up SKU.
+Before enabling image top-ups, establish the account mapping and authenticated
+balance lookup, then verify webhook fulfillment and payment-event deduplication
+against the same ledger used by generation. Do not credit on a redirect or
+expose the shared generation token in the browser.

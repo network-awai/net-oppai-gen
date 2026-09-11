@@ -20,14 +20,14 @@
                            (db/works-loaded works)
                            (db/set-tab (route/fragment->view js/location.hash)))
                  confirmed (db/confirm-age))
-           :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil]])})))
+           :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil] [:payments/fetch nil]])})))
 
      (rf/reg-event-fx
       :age/confirm
       (fn [{:keys [db]} _]
         (js/localStorage.setItem db/age-gate-key "1")
         {:db (db/confirm-age db)
-         :fx [[:fleet/fetch nil] [:face/fetch nil]]}))
+         :fx [[:fleet/fetch nil] [:face/fetch nil] [:payments/fetch nil]]}))
 
      ;; The nav writes the fragment; the fragment IS the view (one document,
      ;; addressable screens — ADR-2608080100). `hashchange` feeds back so the
@@ -50,6 +50,19 @@
                       (fn [{:keys [db]} [_ id]]
                         (let [db' (db/remove-work db id)]
                           {:db db' :fx [[:works/persist (db/works-for-storage db')]]})))
+
+     (rf/reg-fx :payments/fetch
+                (fn [_]
+                  (net/fetch-payments!
+                   {:on-ok #(rf/dispatch [:payments/loaded %])
+                    :on-error #(rf/dispatch [:payments/failed %])})))
+     (rf/reg-event-db :payments/loaded
+                      (fn [db [_ options]] (assoc db :payments options)))
+     (rf/reg-event-db :payments/failed
+                      (fn [db _] (assoc db :payments {:text {:status "unavailable"}})))
+     (rf/reg-event-fx :payments/refresh
+                      (fn [{:keys [db]} _]
+                        {:db (dissoc db :payments) :fx [[:payments/fetch nil]]}))
 
      ;; ---- fleet -------------------------------------------------------------
 

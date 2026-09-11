@@ -259,3 +259,6 @@
      poll-interval-ms)))
 
 (defn data-uri [b64] (str "data:image/png;base64," (str/trim (str b64))))
+
+(defn fetch-payments! [callbacks]
+  (fetch-json! "/api/payments" callbacks))

@@ -17,6 +17,8 @@
   loadable in a browser build."
   (:require [clojure.edn :as edn]
             [css.core :as css]
+            [html.core :as html]
+            [jp-go-dds.dark :as dark]
             [oppai.gen.ui :as ui]
             [jp-go-dds.page :as dds-page]
             [jp-go-dds.tokens :as tokens]
@@ -117,6 +119,13 @@
              :background "var(--hig-color-secondary-system-background)"
              :color "var(--hig-color-label)"
              :font-family "var(--hig-font-text)"}]
+    [".oppai-payments" {:display :grid :gap "20px" :width "100%"}]
+    [".oppai-payment-card" {:padding "24px" :min-width 0
+                            :background "var(--hig-color-system-background)"
+                            :border "1px solid var(--hig-color-separator)" :border-radius "16px"}]
+    [".oppai-payment-card .dads-button" {:margin "8px 8px 8px 0" :max-width "100%"}]
+    [".oppai-payment-price" {:font-size "2rem" :font-weight 700}]
+    [".oppai-payment-address" {:overflow-wrap :anywhere :margin-left 0}]
     ["button, textarea, input, select" {:font :inherit}]
 
     [".oppai-shell" {:display :grid
@@ -592,13 +601,28 @@
    [:main [:h1 "モデル一覧へ移動しました"]
     [:a {:href "/#models"} "元のモデル名でモデルを探す"]]))
 
+(defn dark-document [document css-text]
+  (let [head (nth document 2)
+        children (mapcat #(if (seq? %) % [%]) (rest head))
+        keep-node? #(not (and (vector? %) (= :meta (first %))
+                             (contains? #{"color-scheme" "theme-color"} (:name (second %)))))]
+    (-> document
+        (assoc-in [1 :data-theme] "dark")
+        (assoc 2 (into [:head
+                       [:meta {:name "color-scheme" :content "dark"}]
+                       [:meta {:name "theme-color" :content (dark/resolve-dark css-text "--color-neutral-white")}]]
+                      (filter keep-node? children))))))
+
 (defn render-html
   "The bundle src comes from the build manifest, so the HTML always points at
   the hash that was actually emitted."
   ([] (render-html (dds-css) (bundle-path)))
   ([css-text] (render-html css-text (bundle-path)))
   ([css-text bundle]
-   (dds-page/->page
+   (str "<!DOCTYPE html>\n"
+        (html/->html
+         (dark-document
+          (dds-page/page
     {:title page-title
      :dark? true
      :lang "ja"
@@ -607,7 +631,7 @@
      :app-css (str tokens/skin-css "\n" (render-css))
      :head (conj age-gate-head [:link {:rel "icon" :type "image/svg+xml" :href "/img/oppai-symbol.svg"}])}
     [:div {:id "app"}]
-    [:script {:src bundle}])))
+    [:script {:src bundle}]) css-text)))))
 
 (defn hex-color-count
   "Raw hex literals in a CSS string. Under DADS there is no theme map, so the

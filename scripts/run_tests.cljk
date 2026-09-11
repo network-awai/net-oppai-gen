@@ -7,6 +7,7 @@
   failure or error."
   (:require [cljs.test :as t]
             [node-io]
+            [oppai.gen.billing-test]
             [oppai.gen.catalog-test]
             [oppai.gen.chat-test]
             [oppai.gen.db-test]
@@ -23,7 +24,8 @@
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (js/process.exit (if (t/successful? m) 0 1)))
 
-(t/run-tests 'oppai.gen.catalog-test
+(t/run-tests 'oppai.gen.billing-test
+             'oppai.gen.catalog-test
              'oppai.gen.chat-test
              'oppai.gen.db-test
              'oppai.gen.fleet-test

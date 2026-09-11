@@ -33,6 +33,7 @@
   until they delete it or it expires."
   (:require [kotoba.lang.text :as str]
             [oppai.gen.guard :as guard]
+            [oppai.gen.billing :as billing]
             [goog.object :as gobj]))
 
 (def ^:private chat-upstream "https://api.murakumo.cloud/v1/chat/completions")
@@ -352,6 +353,18 @@
             :upstream generation-upstream}}
    200))
 
+(defn- payment-options! []
+  (-> (js/fetch billing/offer-url
+                #js {:headers #js {"accept" "application/json"}
+                     :signal (js/AbortSignal.timeout 10000)})
+      (.then (fn [response]
+               (if (.-ok response) (.json response)
+                   (throw (js/Error. "Payment discovery unavailable")))))
+      (.then (fn [offer]
+               (json-response (billing/payment-options (js->clj offer :keywordize-keys true)) 200)))
+      (.catch (fn [_]
+                (json-response (billing/payment-options nil) 503)))))
+
 ;; ---- routing ----------------------------------------------------------------
 
 (def ^:private job-path #"^/api/generation/jobs/([A-Za-z0-9_-]{1,128})$")
@@ -369,6 +382,11 @@
       (if-not (same-origin? request)
         (error-response "forbidden_origin" "this endpoint serves oppai.fans only" 403)
         (cond
+          (= "/api/payments" path)
+          (if (= "GET" method)
+            (payment-options!)
+            (error-response "method_not_allowed" "GET only" 405))
+
           (= "/api/chat" path)
           (if (= "POST" method)
             (proxy-chat! request env)

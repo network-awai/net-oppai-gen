@@ -1,0 +1,26 @@
+(ns oppai.gen.billing-test
+  (:require [clojure.test :refer [deftest is]]
+            [oppai.gen.billing :as billing]))
+
+(def offer
+  {:facilitator "https://x402.nexus"
+   :resources [{:method "POST" :path "/x402/v2/chat/completions" :x402Version 2
+                :price {:usd "0.01" :network "base"
+                        :asset "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+                        :payTo "0xA00366234D29d4F882088048c0B2fa0dB7302D4E"}}]})
+
+(deftest discovery-never-claims-image-credit-fulfillment
+  (let [options (billing/payment-options offer)]
+    (is (= "available" (get-in options [:text :status])))
+    (is (= billing/checkout-url (get-in options [:text :checkout-url])))
+    (is (= "unavailable" (get-in options [:image-credits :status])))))
+
+(deftest missing-or-incompatible-offers-cannot-open-checkout
+  (doseq [bad [nil {} (assoc offer :facilitator "https://unknown.invalid")
+               (assoc-in offer [:resources 0 :price :usd] "0")
+               (assoc-in offer [:resources 0 :price :usd] "-0.01")
+               (assoc-in offer [:resources 0 :price :payTo] "invalid")
+               (assoc-in offer [:resources 0 :price :network] "base-sepolia")
+               (assoc-in offer [:resources 0 :price :asset] "unknown")
+               (assoc-in offer [:resources 0 :path] "/x402/v2/images/generations")]]
+    (is (= {:status "unavailable"} (:text (billing/payment-options bad))))))
