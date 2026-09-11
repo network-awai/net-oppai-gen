@@ -1,0 +1,59 @@
+;; cljk_mirror — derive the platform-extension tree nbb and shadow-cljs can
+;; load from this repo's canonical .cljk sources.
+;;
+;;   nbb scripts/cljk_mirror.cljk          -> writes .cljk-build/{src,test,scripts}
+;;
+;; Why this exists (2026-09-11): the workspace renamed every Clojure source to
+;; .cljk (adr-2609111500-cljk-rename-all-clojure-source, "no compatibility
+;; mirror -- build breakage is fixed forward"). nbb 1.4.208 resolves
+;; namespaces only from .cljs/.cljc/.clj and shadow-cljs likewise, and the
+;; managed .cljk host loader is a proposal (com-junkawasaki/root#3093), not
+;; a program. Until it is one, THIS is the fix-forward for this repo: a
+;; generated, git-ignored derivation — never edited, never committed, rebuilt
+;; before every test/build — whose extensions come from cljk-origin.edn.
+;;
+;; It refuses (exit 2) when a .cljk file has no entry in cljk-origin.edn:
+;; guessing .cljc for a file that was .cljs would compile a browser-only
+;; namespace for the JVM half of a reader conditional and fail somewhere
+;; else. Record the origin; do not guess.
+;;
+;; Removal condition: the day `nbb --classpath src` resolves a .cljk
+;; namespace, delete this file, `.cljk-build` from .gitignore, and put
+;; `src`/`test`/`scripts` back in package.json and deps.edn.
+;;
+;; Single file, no local requires — it must run before any namespace of this
+;; repo is loadable.
+(ns cljk-mirror
+  (:require ["node:fs" :as fs]
+            ["node:path" :as path]
+            [cljs.reader :as reader]))
+
+(def out-root ".cljk-build")
+(def roots ["src" "test" "scripts"])
+
+(defn walk [dir]
+  (if (fs/existsSync dir)
+    (mapcat (fn [name]
+              (let [p (path/join dir name)]
+                (if (.isDirectory (fs/statSync p)) (walk p) [p])))
+            (fs/readdirSync dir))
+    []))
+
+(defn -main []
+  (let [origins (:origins (reader/read-string (fs/readFileSync "cljk-origin.edn" "utf8")))
+        files (filter #(.endsWith % ".cljk") (mapcat walk roots))
+        unknown (remove #(contains? origins %) files)]
+    (when (seq unknown)
+      (println "REFUSED: .cljk files with no entry in cljk-origin.edn (record the original extension):")
+      (doseq [f unknown] (println "  " f))
+      (js/process.exit 2))
+    (when (fs/existsSync out-root) (fs/rmSync out-root #js {:recursive true :force true}))
+    (doseq [f files]
+      (let [target (path/join out-root (str (subs f 0 (- (count f) 5)) (get origins f)))]
+        (fs/mkdirSync (path/dirname target) #js {:recursive true})
+        (fs/copyFileSync f target)))
+    ;; non-source files the scripts read relative to themselves stay where
+    ;; they are; only Clojure source is mirrored.
+    (println (str "cljk-mirror: " (count files) " file(s) -> " out-root "/"))))
+
+(-main)

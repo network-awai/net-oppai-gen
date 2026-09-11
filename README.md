@@ -70,6 +70,14 @@
 
 ## 開発
 
+**source は `.cljk` が正本**（2026-09-11、adr-2609111500-cljk-rename-all-clojure-source、
+元の拡張子は `cljk-origin.edn`）。nbb も shadow-cljs もまだ `.cljk` を namespace として
+解決できない（loader は root#3093 の提案段階）ので、`npm run cljk`
+（`scripts/cljk_mirror.cljk`、単一ファイル）が `.cljk-build/` に元拡張子の派生 tree を
+書き、test / build はそこを classpath にする。**派生 tree は編集も commit もしない**
+（gitignore）。origin の記録が無い `.cljk` は拒否される（推測しない）。loader が着地したら
+mirror・`.cljk-build`・deps.edn の `:paths` を元に戻す。
+
 ```bash
 npm install
 npm run dev          # shadow-cljs watch (http://localhost:8790)

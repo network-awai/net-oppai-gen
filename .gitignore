@@ -9,3 +9,4 @@ node_modules/
 public/assets/
 public/index.html
 target/
+.cljk-build/

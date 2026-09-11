@@ -1,4 +1,7 @@
-{:paths ["src"]
+{;; Sources are canonical .cljk (cljk-origin.edn); shadow-cljs and the JVM read the
+ ;; derived tree `npm run cljk` writes (scripts/cljk_mirror.cljk). Temporary until a
+ ;; .cljk host loader exists (com-junkawasaki/root#3093).
+ :paths [".cljk-build/src"]
  :deps
  {
         ;; kotoba.lang.text, not clojure.string. Pinned as an explicit floor:
@@ -40,7 +43,7 @@
     io.github.kotoba-lang/css {:local/root "../../kotoba-lang/css"}}}
 
   :test
-  {:extra-paths ["test"]
+  {:extra-paths [".cljk-build/test"]
    :extra-deps {io.github.cognitect-labs/test-runner
                 {:git/tag "v0.5.1" :git/sha "dfb30dd6605cb6c0efc275e1df1736f6e90d4d73"}}
    :main-opts ["-m" "cognitect.test-runner"]
