@@ -605,6 +605,9 @@
            [:h2 (:title work)]
            [:p (if (:producer work) [:a {:href "#producer"} "✦ Producer · BOT"] "oppai.fans Studio")]
            [:p {:class "oppai-note"} "AI生成作品 · 768 × 768"]
+           (when (seq (:tags work))
+             [:div {:class "oppai-work-tags" :aria-label "制作タグ"}
+              (for [tag (:tags work)] ^{:key tag} [:span tag])])
            [:h3 "使用モデル"] [:a {:href (str "#model/" (:model work))} (:model work)]
            (when (:prompt work) [:div [:h3 "制作プロンプト"] [:p {:class "oppai-prompt-copy"} (:prompt work)]])
            (ui/button (if (:prompt work) "このプロンプトで作成" "このモデルで作成")

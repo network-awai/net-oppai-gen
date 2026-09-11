@@ -615,6 +615,8 @@
 .oppai-detail-image {width:100%;border-radius:16px;}
 .oppai-detail-info {padding:24px;background:var(--hig-color-system-background);border-radius:16px;overflow-wrap:anywhere;}
 .oppai-detail-info .dads-button {margin-top:20px;}
+.oppai-work-tags {display:flex;flex-wrap:wrap;gap:6px;margin:16px 0;}
+.oppai-work-tags span {padding:5px 9px;border-radius:8px;background:var(--hig-color-secondary-system-background);font-size:.75rem;}
 .oppai-prompt-copy {font-size:.875rem;line-height:1.7;padding:16px;border-radius:12px;background:var(--hig-color-secondary-system-background);user-select:text;}
 .oppai-model-description {margin:20px 0;padding:24px;background:var(--hig-color-system-background);border-radius:16px;overflow-wrap:anywhere;}
 .oppai-footer a {color:var(--hig-color-secondary-label);}

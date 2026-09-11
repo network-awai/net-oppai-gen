@@ -220,3 +220,19 @@ private user prompts are never added to the public catalog. Remix requires
 fresh publication consent and clears face references. Model covers use exact
 checkpoint samples; models without samples are labeled accordingly. Posts
 support anime/realistic filters. Hash navigation preserves browser history.
+
+
+### Tag-guided Producer collection
+
+The 2026-09-11 collection combines original adult, clothed character briefs
+with descriptive tags. References: [TensorHub character categories](https://tensorhub.art/channels/107),
+[Danbooru portrait](https://shima.donmai.us/wiki_pages/portrait),
+[long hair](https://shima.donmai.us/wiki_pages/long_hair), and
+[kimono](https://shima.donmai.us/wiki_pages/kimono). Civitai was inaccessible
+and is not claimed as a verified source. No third-party image or full prompt
+was imported. Tags describe the production brief, not automatically verified
+image contents. Operator-owned prompts can be reused from post details.
+
+Six images were generated and visually reviewed before publication: three
+Animagine and three WAI, each with price 0. Generation time ranged from
+54.604 to 105.810 seconds. Both model quotas returned remaining=0.
