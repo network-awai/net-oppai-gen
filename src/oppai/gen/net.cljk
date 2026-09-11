@@ -28,7 +28,7 @@
 
 (defn- ->clj [x] (js->clj x :keywordize-keys true))
 
-(defn- error-text
+(defn- base-error-text
   "A message a person can act on. `resp.statusText` alone is noise; the body
   usually carries the real reason, so it is preferred when present."
   [status body]
@@ -37,7 +37,7 @@
                    (:message body))]
     (cond
       (= (get-in body [:error :code]) "preview_busy") "無料生成枠が使用中です。少し待ってから再試行してください。"
-      (= (get-in body [:error :code]) "daily_limit") "本日の無料生成回数を使い切りました。日本時間9時にリセットされます。"
+      (= (get-in body [:error :code]) "daily_limit") "このネットワークの本日の無料回数に達しました。同じWi-Fiの利用も含みます。日本時間9時にリセットされます。初回なら下のリンクからお知らせください。"
       (= (get-in body [:error :code]) "daily_capacity") "本日の無料生成枠が満了しました。日本時間9時以降に再試行してください。"
       (= (get-in body [:error :code]) "preview_unavailable") "無料生成ノードが応答しませんでした。時間をおいて再試行してください。料金は発生しません。"
       (= detail "insufficient credits")
@@ -47,6 +47,10 @@
       "このモデルは生成料金が未登録です。現在は Animagine XL 4.0 を選択してください。"
       (seq (str detail)) (str detail " (HTTP " status ")")
       :else (str "リクエストが失敗しました (HTTP " status ")"))))
+
+(defn- error-text [status body]
+  (str (base-error-text status body)
+       (when-let [id (:request_id body)] (str "　エラー番号: " id))))
 
 (defn- fetch-json!
   [url {:keys [method body on-ok on-error]}]
@@ -269,3 +273,6 @@
 
 (defn submit-free-image! [callbacks]
   (fetch-json! "/api/free/image" (assoc callbacks :method "POST")))
+
+(defn submit-feedback! [callbacks]
+  (fetch-json! "/api/feedback" (assoc callbacks :method "POST")))

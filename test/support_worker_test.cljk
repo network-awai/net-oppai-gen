@@ -1,0 +1,64 @@
+(ns support-worker-test
+  (:require ["node:assert/strict" :as assert]
+            ["node:sqlite" :refer [DatabaseSync]]
+            ["node:fs" :as fs]
+            ["node:url" :as url]
+            ["node:path" :as path]))
+
+(def db (DatabaseSync. ":memory:"))
+(.exec db (fs/readFileSync "migrations/0001_feedback.sql" "utf8"))
+(defn prepared [sql args]
+  #js {:bind (fn [& values] (prepared sql values))
+       :first (fn [] (js/Promise.resolve (.apply (.-get (.prepare db sql)) (.prepare db sql) (to-array args))))
+       :run (fn [] (let [r (.apply (.-run (.prepare db sql)) (.prepare db sql) (to-array args))]
+                    (js/Promise.resolve #js {:meta #js {:changes (js/Number (.-changes r))}})))})
+(def d1 #js {:prepare #(prepared % [])
+             :batch (fn [statements] (js/Promise.all (.map statements #(.run %))))})
+(def pending (atom []))
+(def ctx #js {:waitUntil #(swap! pending conj %)})
+(def env #js {:OPPAI_DB d1 :OPPAI_PREVIEW_SPONSOR_TOKEN "test-only-secret"})
+(def sent (atom []))
+(set! (.-fetch js/globalThis)
+      (fn [_ init]
+        (swap! sent conj (js->clj (.-headers init)))
+        (js/Promise.resolve (js/Response. "{\"error\":{\"code\":\"daily_limit\",\"message\":\"quota\"}}" #js {:status 429}))))
+(defn request [path body ip]
+  (js/Request. (str "https://oppai.fans" path)
+               #js {:method "POST" :headers #js {"origin" "https://oppai.fans" "content-type" "application/json" "cf-connecting-ip" ip "x-preview-network" "forged"}
+                    :body (js/JSON.stringify (clj->js body))}))
+(def valid {:category "bug" :message "first visit quota issue" :page "#image" :error_id ""})
+(def free {:model "waiREALMIX_v11" :prompt "DO_NOT_LOG_PROMPT" :publication_consent "public-examples-v1"})
+(defn call! [worker path body ip expected]
+  (-> (.fetch worker (request path body ip) env ctx)
+      (.then (fn [r] (assert/equal (.-status r) expected) (.json r)))))
+(-> (js/eval (str "import(" (js/JSON.stringify (str (url/pathToFileURL (path/resolve "dist/worker.js")))) ")"))
+    (.then (fn [module]
+             (let [worker (.-default module)]
+               (-> (reduce (fn [p _] (.then p #(call! worker "/api/feedback" valid "192.0.2.1" 201))) (js/Promise.resolve) (range 10))
+                   (.then #(call! worker "/api/feedback" valid "192.0.2.1" 429))
+                   (.then #(call! worker "/api/feedback" valid "192.0.2.2" 201))
+                   (.then #(call! worker "/api/feedback" (assoc valid :message "") "192.0.2.2" 400))
+                   (.then #(call! worker "/api/feedback" (assoc valid :message (apply str (repeat 9000 "x"))) "192.0.2.2" 503))
+                   (.then #(call! worker "/api/free/image" free "192.0.2.1" 429))
+                   (.then (fn [body] (assert/match (.-request_id body) #"^[a-f0-9-]{36}$") (call! worker "/api/free/image" free "192.0.2.2" 429)))
+                   (.then (fn [_]
+                            (assert/notEqual (get (first @sent) "x-preview-network") (get (second @sent) "x-preview-network"))
+                            (assert/match (get (first @sent) "x-preview-network") #"^[a-f0-9]{64}$")
+                            (assert/notEqual (get (first @sent) "x-preview-network") "forged")
+                            (js/Promise.all (to-array @pending))))
+                   (.then (fn [_]
+                            (assert/equal (.-n (.get (.prepare db "SELECT count(*) n FROM feedback"))) 11)
+                            (let [logs (js/JSON.stringify (.all (.prepare db "SELECT * FROM site_errors")))]
+                              (assert/equal (.includes logs "DO_NOT_LOG_PROMPT") false)
+                              (assert/equal (.includes logs "192.0.2.") false)
+                              (assert/equal (.includes logs "first visit") false)
+                              (assert/equal (.includes logs "daily_limit") true))
+                            (.exec db "UPDATE feedback SET created_at=0; UPDATE site_errors SET created_at=0")
+                            (.scheduled worker nil env ctx)
+                            (js/Promise.all (to-array @pending))))
+                   (.then (fn [_]
+                            (assert/equal (.-n (.get (.prepare db "SELECT count(*) n FROM feedback"))) 0)
+                            (assert/equal (.-n (.get (.prepare db "SELECT count(*) n FROM site_errors"))) 0)
+                            (println "Support integration passed: persistence, limits, isolation, spoof rejection, privacy, retention, error IDs")
+                            (.close db)))))))
+    (.catch (fn [e] (.error js/console e) (js/process.exit 1))))

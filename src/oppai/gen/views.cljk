@@ -17,7 +17,8 @@
 (defn- error-banner [message]
   (when (seq (str message))
     (ui/notification {:type :error :heading "エラー" :class "oppai-error"}
-                     [:p (str message)])))
+                     [:p (str message)]
+                     [:a {:href "#feedback"} "不具合を報告する"])))
 
 #?(:cljs
    (defn fleet-note
@@ -635,6 +636,38 @@
           [:h2 "このモデルの作品"] [public-gallery nil id]]))))
 
 #?(:cljs
+   (defn feedback-view []
+     (let [form (r/atom {:category "bug" :message "" :page "#image" :error_id ""})
+           busy? (r/atom false) result (r/atom nil) error (r/atom nil)]
+       (fn []
+         [:section {:class "oppai-studio"}
+          [:h2 "ご意見・不具合・コメント"]
+          [:p "初回なのに無料枠が使えない場合など、こちらからお知らせください。運営が定期的に確認します。"]
+          [:p {:class "oppai-note"} "送信内容は運営のみが確認します（90日保存）。個人情報やパスワードは入力しないでください。エラー記録は30日保存します。"]
+          [:form {:on-submit (fn [event]
+                              (.preventDefault event)
+                              (reset! busy? true) (reset! error nil) (reset! result nil)
+                              (net/submit-feedback!
+                               {:body @form
+                                :on-ok (fn [body] (reset! busy? false) (reset! result (:id body)) (swap! form assoc :message ""))
+                                :on-error (fn [message] (reset! busy? false) (reset! error message))}))}
+           (ui/field {:label "種類" :for "feedback-category"}
+                     [:select {:id "feedback-category" :value (:category @form) :on-change #(swap! form assoc :category (.. % -target -value))}
+                      [:option {:value "bug"} "不具合"] [:option {:value "idea"} "改善要望"] [:option {:value "comment"} "コメント"]])
+           (ui/field {:label "内容" :for "feedback-message"}
+                     [:textarea {:id "feedback-message" :required true :max-length 2000 :rows 6 :value (:message @form)
+                                 :on-change #(swap! form assoc :message (.. % -target -value))}])
+           (ui/field {:label "画面" :for "feedback-page"}
+                     [:select {:id "feedback-page" :value (:page @form) :on-change #(swap! form assoc :page (.. % -target -value))}
+                      [:option {:value "#image"} "画像生成"] [:option {:value "#models"} "モデル"] [:option {:value "#posts"} "投稿"] [:option {:value "#home"} "その他"]])
+           (ui/field {:label "エラー番号（任意）" :for "feedback-error"}
+                     [:input {:id "feedback-error" :max-length 36 :value (:error_id @form)
+                              :on-change #(swap! form assoc :error_id (.. % -target -value))}])
+           (ui/button (if @busy? "送信中…" "送信する") {:type "submit" :disabled @busy?})]
+          (when @error [:p {:role "alert"} @error])
+          (when @result [:p {:role "status"} (str "受け付けました。ありがとうございます。受付番号: " @result)])]))))
+
+#?(:cljs
    (defn payments-view []
      (let [options @(rf/subscribe [:payments])
            text (:text options)
@@ -694,11 +727,11 @@
             [:a {:href "https://murakumo.cloud"} "murakumo.cloud ↗"]]]
           [:main {:class "oppai-home" :id "main-content"}
            [:div {:class "oppai-page-heading"}
-            [:h1 (case tab :home "ホーム" :producer "Producer" :posts "投稿" :tools "AIツール" :payments "決済"
+            [:h1 (case tab :feedback "ご意見・不具合" :home "ホーム" :producer "Producer" :posts "投稿" :tools "AIツール" :payments "決済"
                         :model-detail "モデル詳細" :post-detail "作品詳細" :models "モデル" :image "画像作成" :douga "動画作成"
                         :face "自分の顔" :works "ライブラリ" "チャット")]]
            [:div {:class "oppai-main"}
-            (case tab :producer [producer-view] :payments [payments-view] :home [home-view] :posts [posts-view] :model-detail [model-detail-view] :post-detail [post-detail-view] :tools [tools-view]
+            (case tab :feedback [feedback-view] :producer [producer-view] :payments [payments-view] :home [home-view] :posts [posts-view] :model-detail [model-detail-view] :post-detail [post-detail-view] :tools [tools-view]
                   :image [image-studio] :douga [douga-studio] :face [face-view]
                   :models [models-view] :works [works-view] [chat-studio])]]
           [:footer {:class "oppai-footer"} [:p "© 2026 oppai.fans"] [:nav {:aria-label "サイトリンク"} [:a {:href "#models"} "モデル"] " · " [:a {:href "#posts"} "投稿"] " · " [:a {:href "#producer"} "Producer"] " · " [:a {:href "#tools"} "AIツール"]]]]))))

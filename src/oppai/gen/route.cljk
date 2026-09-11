@@ -14,6 +14,7 @@
    {:id :tools :label "AIツール" :icon "✧" :fragment "tools"}
    {:id :producer :label "Producer" :icon "✦" :fragment "producer"}
    {:id :posts :label "投稿" :icon "▧" :fragment "posts"}
+   {:id :feedback :label "ご意見・不具合" :icon "✉" :fragment "feedback"}
    {:id :payments :label "決済" :icon "◇" :fragment "payments"}
    {:id :model-detail :label "モデル詳細" :fragment "model" :nav? false}
    {:id :post-detail :label "作品詳細" :fragment "post" :nav? false}

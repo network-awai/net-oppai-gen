@@ -34,6 +34,7 @@
   (:require [kotoba.lang.text :as str]
             [oppai.gen.guard :as guard]
             [oppai.gen.billing :as billing]
+            [oppai.gen.feedback :as feedback]
             [goog.object :as gobj]))
 
 (def ^:private chat-upstream "https://api.murakumo.cloud/v1/chat/completions")
@@ -364,14 +365,16 @@
                    (error-response "invalid_request" "公開前レビューへの同意と2000文字以内のプロンプトが必要です。" 400)
                    ;; No generation token and no billing identity on the free lane.
                    ;; The upstream retains its network/day quota and concurrency gate.
-                   (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
+                   (-> (feedback/network-id! request env)
+                       (.then (fn [network]
+                         (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
                              #js {:method "POST" :headers (clj->js
-                                  (cond-> {"content-type" "application/json"}
+                                  (cond-> {"content-type" "application/json" "x-preview-network" network}
                                     (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN")
                                     (assoc "x-preview-sponsor" (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN"))))
                                   :signal (js/AbortSignal.timeout 120000)
                                   :body (js/JSON.stringify #js {:model profile :prompt prompt
-                                                              :publication_consent consent})})))))
+                                                              :publication_consent consent})}))))))))
       (.catch (fn [_] (error-response "free_unavailable" "無料生成を完了できませんでした。料金は発生しません。" 503)))))
 
 (defn- payment-options! []
@@ -391,7 +394,7 @@
 (def ^:private job-path #"^/api/generation/jobs/([A-Za-z0-9_-]{1,128})$")
 (def ^:private artifact-path #"^/api/generation/jobs/([A-Za-z0-9_-]{1,128})/artifact$")
 
-(defn fetch-handler [request env _ctx]
+(defn- handle-request [request env _ctx]
   (let [url (js/URL. (.-url request))
         path (.-pathname url)
         method (.-method request)]
@@ -403,6 +406,10 @@
       (if-not (same-origin? request)
         (error-response "forbidden_origin" "this endpoint serves oppai.fans only" 403)
         (cond
+          (= "/api/feedback" path)
+          (if (= "POST" method) (feedback/submit! request env)
+              (error-response "method_not_allowed" "POST only" 405))
+
           (= "/api/free/image" path)
           (if (= "POST" method) (free-image! request env)
               (error-response "method_not_allowed" "POST only" 405))
@@ -459,4 +466,11 @@
       :else
       (.fetch (gobj/get env "ASSETS") request))))
 
-(def default (clj->js {:fetch fetch-handler}))
+(defn fetch-handler [request env ctx]
+  (-> (js/Promise.resolve nil)
+      (.then (fn [_] (handle-request request env ctx)))
+      (.catch (fn [_] (error-response "internal_error" "処理を完了できませんでした。時間をおいて再試行してください。" 500)))
+      (.then (fn [response] (feedback/observe! request env ctx response)))))
+
+(def default (clj->js {:fetch fetch-handler
+                      :scheduled (fn [_ env ctx] (.waitUntil ctx (feedback/cleanup! env)))}))
