@@ -18,6 +18,12 @@
   Unload:
     launchctl bootout gui/$(id -u)/network.awai.bot.oppai-studio
 
+  The job calls nbb directly rather than `npm run bot:tick`: measured
+  2026-09-11, the third launchd run hung inside npm for 8 minutes before
+  ever starting the script (stuck after "verbose logfile", no child
+  process), while the same command from a shell was fine. A loop that
+  depends on npm's startup is a loop that stops without saying so.
+
   State and artifacts: ~/.itonami/oppai-studio/ (receipts.edn is append-only).
   lock: ~/.itonami/oppai-studio/tick.lock (a tick that finds a fresh lock exits 2).
 -->
@@ -46,7 +52,7 @@
 	<array>
 		<string>/bin/zsh</string>
 		<string>-lc</string>
-		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; exec npm run --silent bot:tick</string>
+		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; nbb scripts/cljk_mirror.cljk &amp;&amp; exec nbb --classpath .cljk-build/src:.cljk-build/scripts:../../kotoba-lang/text/src .cljk-build/scripts/oppai_studio_tick.cljs</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
