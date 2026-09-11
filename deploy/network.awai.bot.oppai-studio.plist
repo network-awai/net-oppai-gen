@@ -24,6 +24,11 @@
   process), while the same command from a shell was fine. A loop that
   depends on npm's startup is a loop that stops without saying so.
 
+  And `zsh -c`, not `-lc`: the login shell sources ~/.zprofile, whose
+  `brew shellenv` took over 20 s of CPU under this workstation's usual
+  load (100+, many concurrent agents) before the tick even started. PATH is
+  set explicitly above, so nothing in the profile is needed.
+
   State and artifacts: ~/.itonami/oppai-studio/ (receipts.edn is append-only).
   lock: ~/.itonami/oppai-studio/tick.lock (a tick that finds a fresh lock exits 2).
 -->
@@ -51,7 +56,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/zsh</string>
-		<string>-lc</string>
+		<string>-c</string>
 		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; nbb scripts/cljk_mirror.cljk &amp;&amp; exec nbb --classpath .cljk-build/src:.cljk-build/scripts:../../kotoba-lang/text/src .cljk-build/scripts/oppai_studio_tick.cljs</string>
 	</array>
 	<key>RunAtLoad</key>
