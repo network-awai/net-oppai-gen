@@ -82,6 +82,9 @@
 (defn- json-parse [s] (try (js->clj (js/JSON.parse (str s)) :keywordize-keys true) (catch :default _ nil)))
 
 (defn- sh-quote [s] (str "'" (str/replace (str s) "'" "'\\''") "'"))
+(defn- sh-quote-dollar
+  "Double-quoted, so $HOME expands and everything else is literal."
+  [s] (str "\"" (str/replace (str s) "\"" "\\\"") "\""))
 
 (defn- sha256 [buf] (.digest (.update (crypto/createHash "sha256") buf) "hex"))
 
@@ -130,16 +133,24 @@
                              (select-keys o [:filename :subfolder :type])))})))
 
 (defn comfy-fetch!
-  "Bring one output home. -> {:path :bytes :buf} or nil."
+  "Bring one output home, then delete it on the node. -> {:path :bytes :buf} or nil.
+
+  The delete is what keeps a 24h loop from filling a mini's disk: ~1.3 MB a
+  still, ~100 stills an hour across the image lanes, and asher started the
+  day with 34 GiB free. Deleted only after the bytes are on this machine and
+  their length matches; a fetch that came back short leaves the file."
   [host {:keys [filename subfolder type]} node]
   (let [q (str "filename=" (js/encodeURIComponent filename) "&subfolder=" (js/encodeURIComponent (or subfolder ""))
                "&type=" (or type "output"))
         r (ssh host (str "curl -s --max-time 60 'http://localhost:" comfy-port "/view?" q "'") true)]
     (when (and (zero? (:exit r)) (:out r) (pos? (.-length (:out r))))
       (let [dir (str out-dir "/" node)
-            p (str dir "/" filename)]
+            p (str dir "/" filename)
+            remote (str "$HOME/ComfyUI/" (or type "output") "/" (when-not (str/blank? (str subfolder)) (str subfolder "/")) filename)]
         (fs/mkdirSync dir #js {:recursive true})
         (fs/writeFileSync p (:out r))
+        (when (= (.-length (:out r)) (.-size (fs/statSync p)))
+          (ssh host (str "f=" (sh-quote-dollar remote) "; [ -f \"$f\" ] && [ \"$(stat -f %z \"$f\")\" = \"" (.-length (:out r)) "\" ] && rm -f \"$f\"")))
         {:path p :bytes (.-length (:out r)) :buf (:out r)}))))
 
 ;; ---------------------------------------------------------------- tts over ssh (mlx-audio CLI)
@@ -156,7 +167,7 @@
                     " --voice " (sh-quote voice)
                     " --file_prefix " name " --lang_code ja >/dev/null 2>&1; "
                     "f=$(ls -t " remote-dir "/" name "*.wav 2>/dev/null | head -1); "
-                    "[ -n \"$f\" ] && cat \"$f\"")
+                    "[ -n \"$f\" ] && cat \"$f\" && rm -f \"$f\"")
         t0 (.now js/Date)
         r (ssh host script true)]
     (when (and (zero? (:exit r)) (:out r) (pos? (.-length (:out r))))
