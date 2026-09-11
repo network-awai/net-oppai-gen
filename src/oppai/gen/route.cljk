@@ -8,14 +8,14 @@
   (:require [kotoba.lang.text :as str]))
 
 (def views
-  [{:id :image  :label "画像"     :icon "▣" :fragment "image"}
+  [{:id :models :label "モデル"   :icon "◈" :fragment "models"}
+   {:id :image  :label "画像"     :icon "▣" :fragment "image"}
    {:id :douga  :label "動画"     :icon "▶" :fragment "douga"}
-   {:id :face   :label "自分の顔" :icon "◉" :fragment "face"}
-   {:id :models :label "モデル"   :icon "◈" :fragment "models"}
    {:id :works  :label "作品"     :icon "▤" :fragment "works"}
+   {:id :face   :label "自分の顔" :icon "◉" :fragment "face"}
    {:id :chat   :label "チャット" :icon "◇" :fragment "chat"}])
 
-(def default-view :image)
+(def default-view :models)
 
 (defn fragment->view [fragment]
   (let [f (str/replace (str fragment) #"^#" "")]

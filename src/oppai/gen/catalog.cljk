@@ -31,7 +31,7 @@
 
 (def cards
   [{:id "waiREALMIX_v11"
-    :name "WAI-REALMIX v11"
+    :name "waiREALMIX_v11"
     :base "SDXL 1.0"
     :style :realistic
     :rating :explicit
@@ -42,7 +42,7 @@
     :face-friendly? true
     :hint "写真調。顔参照（自分の顔）との相性が最も良い。"}
    {:id "waiREALCN_v150"
-    :name "WAI-REALCN v1.5"
+    :name "waiREALCN_v150"
     :base "SDXL 1.0"
     :style :realistic
     :rating :explicit
@@ -53,7 +53,7 @@
     :face-friendly? true
     :hint "写真調。日本語話者の顔立ちに寄る。"}
    {:id "Illustrious-XL-v2.0"
-    :name "Illustrious XL v2.0"
+    :name "Illustrious-XL-v2.0"
     :base "SDXL 1.0 (Illustrious)"
     :style :anime
     :rating :explicit
@@ -64,7 +64,7 @@
     :face-friendly? false
     :hint "タグ列（1girl, adult, …）で書く。"}
    {:id "animagine-xl-4.0"
-    :name "Animagine XL 4.0"
+    :name "animagine-xl-4.0"
     :base "SDXL 1.0"
     :style :anime
     :rating :suggestive
@@ -127,3 +127,14 @@
   something the node actually has whenever that is knowable."
   [live]
   (:id (first (with-availability live))))
+
+(defn filter-cards
+  "Case-insensitive search and independent style/availability filters."
+  [items query style available-only?]
+  (let [q (str/lower (str/trim (or query "")))]
+    (->> items
+         (filter #(or (= style :all) (= style (:style %))))
+         (filter #(or (not available-only?) (true? (:available? %))))
+         (filter #(or (empty? q)
+                      (str/includes? (str/lower (str (:name %) " " (:id %) " " (:base %))) q)))
+         vec)))

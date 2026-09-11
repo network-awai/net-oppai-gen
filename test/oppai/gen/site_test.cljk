@@ -58,26 +58,11 @@
 (deftest generation-is-deterministic
   (is (= (site/render-html) (site/render-html))))
 
-(deftest model-pages-keep-dads-and-tell-the-truth
-  (doseq [[id model] site/model-pages]
-    (let [html (site/render-model-html model)]
-      (is (str/includes? html ".dads-button") (str id " keeps DADS"))
-      (is (str/includes? html "oppai-lp") (str id " has the editorial layer"))
-      (is (str/includes? html (:base model)) (str id " attributes its base"))
-      (is (str/includes? html (:image model)) (str id " includes its generated art"))
-      (is (str/includes? html (:image-alt model)) (str id " describes its generated art"))
-      (is (str/includes? html "/img/oppai-network-logo.png") (str id " includes the brand logo"))
-      (is (str/includes? html "開発中") (str id " is not presented as live"))
-      (is (str/includes? html "推論未公開") (str id " discloses inference state"))
-      (is (str/includes? html "https://oppai.fans/og/basho-hokusai.png"))
-      (is (not (str/includes? html "今すぐ利用可能"))))))
-
-(deftest model-page-css-is-token-only-and-washi-inspired
-  (let [css (site/render-model-css)]
-    (is (zero? (site/hex-color-count css)))
-    (is (str/includes? css "repeating-linear-gradient"))
-    (is (str/includes? css "writing-mode: vertical-rl"))
-    (is (str/includes? css "var(--hig-"))))
+(deftest retired-aliases-lead-to-the-real-catalog
+  (let [html (site/render-legacy-redirect)]
+    (is (str/includes? html "0;url=/#models"))
+    (is (str/includes? html "href=\"/#models\""))
+    (is (not (str/includes? html "fine-tune")))))
 
 (deftest button-keeps-both-the-dads-class-and-the-callers
   ;; jp-go-dds merges its own :class after the caller's :attrs, so a class
