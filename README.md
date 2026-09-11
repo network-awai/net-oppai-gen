@@ -1,4 +1,4 @@
-# oppai.fans (net-oppai-gen)
+# oppai.fans (fans-oppai)
 
 **成人向け（R18）の画像・動画生成サービス — civitai / tensorhub 型のモデル
 カタログと、本人の顔だけを使える顔参照つき。** `oppai.fans` の Worker + SPA。
