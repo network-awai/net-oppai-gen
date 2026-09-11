@@ -1,7 +1,7 @@
 (ns run-tests
   "`npm test` — the portable suite, on nbb.
 
-  JVM-free replacement for the old `clojure -M:local:test`
+  JVM-free replacement for the old `kbb -M:local:test`
   (owner decision 2026-09-06). Same `.cljc` test namespaces the JVM runner
   drove; `cljs.test` reports the same counts and exits non-zero on any
   failure or error."

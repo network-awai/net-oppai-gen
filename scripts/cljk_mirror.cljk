@@ -1,7 +1,7 @@
 ;; cljk_mirror — derive the platform-extension tree nbb and shadow-cljs can
 ;; load from this repo's canonical .cljk sources.
 ;;
-;;   nbb scripts/cljk_mirror.cljk          -> writes .cljk-build/{src,test,scripts}
+;;   kbb --backend sci scripts/cljk_mirror.cljk          -> writes .cljk-build/{src,test,scripts}
 ;;
 ;; Why this exists (2026-09-11): the workspace renamed every Clojure source to
 ;; .cljk (adr-2609111500-cljk-rename-all-clojure-source, "no compatibility
@@ -17,7 +17,7 @@
 ;; namespace for the JVM half of a reader conditional and fail somewhere
 ;; else. Record the origin; do not guess.
 ;;
-;; Removal condition: the day `nbb --classpath src` resolves a .cljk
+;; Removal condition: the day `kbb --backend sci --classpath src` resolves a .cljk
 ;; namespace, delete this file, `.cljk-build` from .gitignore, and put
 ;; `src`/`test`/`scripts` back in package.json and deps.edn.
 ;;
