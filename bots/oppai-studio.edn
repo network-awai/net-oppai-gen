@@ -66,7 +66,11 @@
    :lane/model "ltxv-2b-0.9.6-distilled-04-25"
    :lane/checkpoint "ltxv-2b-0.9.6-distilled-04-25.safetensors"
    :lane/clip "t5xxl_fp8_e4m3fn_scaled.safetensors"
-   :lane/nodes ["naphtali" "issachar"]
+   ;; asher joined 2026-09-11 after SVD-XT measured 215-280 s PER STEP at
+   ;; 576x1024x24f on a 16 GiB mini (1.5 h a clip, UNet not resident); the
+   ;; same hardware renders an LTX 704x480x73f clip in ~5 min. The :svd-i2v
+   ;; kind stays in oppai.gen.bot for a node that can afford it.
+   :lane/nodes ["naphtali" "issachar" "asher"]
    :lane/prompt-style :natural
    :lane/quality "cinematic, soft light, slow camera, 24fps, detailed skin"
    :lane/negative "worst quality, blurry, jittery, distorted, deformed, text, watermark"
@@ -75,20 +79,7 @@
    :lane/width 704 :lane/height 480
    :lane/steps 8
    :lane/cfg 3.0
-   :lane/share 0.10}
-  ;; image-to-video on asher's SVD-XT: it animates an image a txt2img lane
-  ;; already passed; no prompt of its own.
-  {:lane/id :video-svd
-   :lane/kind :svd-i2v
-   :lane/model "svd_xt"
-   :lane/checkpoint "svd_xt.safetensors"
-   :lane/nodes ["asher"]
-   :lane/source-lanes [:real-mix :real-cn]
-   :lane/seconds 2
-   :lane/fps 12
-   :lane/width 576 :lane/height 1024
-   :lane/steps 20
-   :lane/share 0.05}
+   :lane/share 0.15}
   ;; voice lines: Qwen3-TTS over mlx-audio on the two audio minis. Japanese,
   ;; adult, short. The text bank is `:voice-lines`.
   {:lane/id :voice
