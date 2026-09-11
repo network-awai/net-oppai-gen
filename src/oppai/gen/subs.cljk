@@ -4,6 +4,7 @@
 
 #?(:cljs
    (do
+     (rf/reg-sub :payments (fn [db _] (:payments db)))
      (rf/reg-sub :tab (fn [db _] (:tab db)))
      (rf/reg-sub :age-confirmed? (fn [db _] (db/age-confirmed? db)))
      (rf/reg-sub :fleet (fn [db _] (:fleet db)))

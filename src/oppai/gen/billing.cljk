@@ -1,0 +1,25 @@
+(ns oppai.gen.billing
+  "Read-only payment discovery. Hosted checkout owns signing and settlement;
+  a paid inference is never treated as an image-credit top-up.")
+
+(def offer-url "https://murakumo.cloud/.well-known/x402")
+(def checkout-url "https://murakumo.cloud/pay/x402/")
+(def facilitator "https://x402.nexus")
+
+(defn payment-options [offer]
+  (let [resource (when (= facilitator (:facilitator offer))
+                   (some #(when (and (= 2 (:x402Version %))
+                                     (= "POST" (:method %))
+                                     (= "/x402/v2/chat/completions" (:path %))
+                                     (= "base" (get-in % [:price :network]))
+                                     (= "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" (get-in % [:price :asset]))
+                                     (re-matches #"0x[0-9a-fA-F]{40}" (str (get-in % [:price :payTo])))
+                                     (re-matches #"(?:0\.[0-9]*[1-9][0-9]*|[1-9][0-9]*(?:\.[0-9]+)?)" (str (get-in % [:price :usd])))) %)
+                         (:resources offer)))]
+    {:text (if resource
+             {:status "available" :price (:price resource)
+              :facilitator facilitator :checkout-url checkout-url}
+             {:status "unavailable"})
+     ;; The generation token's operator account is not the storefront's DID.
+     ;; No public API currently binds those balances, so do not sell a top-up.
+     :image-credits {:status "unavailable" :reason "account-link-required"}}))

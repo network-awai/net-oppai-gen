@@ -20,14 +20,14 @@
                            (db/works-loaded works)
                            (db/set-tab (route/fragment->view js/location.hash)))
                  confirmed (db/confirm-age))
-           :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil]])})))
+           :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil] [:payments/fetch nil]])})))
 
      (rf/reg-event-fx
       :age/confirm
       (fn [{:keys [db]} _]
         (js/localStorage.setItem db/age-gate-key "1")
         {:db (db/confirm-age db)
-         :fx [[:fleet/fetch nil] [:face/fetch nil]]}))
+         :fx [[:fleet/fetch nil] [:face/fetch nil] [:payments/fetch nil]]}))
 
      ;; The nav writes the fragment; the fragment IS the view (one document,
      ;; addressable screens — ADR-2608080100). `hashchange` feeds back so the
@@ -50,6 +50,19 @@
                       (fn [{:keys [db]} [_ id]]
                         (let [db' (db/remove-work db id)]
                           {:db db' :fx [[:works/persist (db/works-for-storage db')]]})))
+
+     (rf/reg-fx :payments/fetch
+                (fn [_]
+                  (net/fetch-payments!
+                   {:on-ok #(rf/dispatch [:payments/loaded %])
+                    :on-error #(rf/dispatch [:payments/failed %])})))
+     (rf/reg-event-db :payments/loaded
+                      (fn [db [_ options]] (assoc db :payments options)))
+     (rf/reg-event-db :payments/failed
+                      (fn [db _] (assoc db :payments {:text {:status "unavailable"}})))
+     (rf/reg-event-fx :payments/refresh
+                      (fn [{:keys [db]} _]
+                        {:db (dissoc db :payments) :fx [[:payments/fetch nil]]}))
 
      ;; ---- fleet -------------------------------------------------------------
 
@@ -126,7 +139,13 @@
 
      ;; ---- image -------------------------------------------------------------
 
-     (rf/reg-event-db :image/set (fn [db [_ k v]] (assoc-in db [:image k] v)))
+     (rf/reg-event-db :image/set
+                      (fn [db [_ k v]]
+                        (cond-> (assoc-in db [:image k] v)
+                          (and (= k :free?) v
+                               (not (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"}
+                                               (get-in db [:image :model]))))
+                          (assoc-in [:image :model] "animagine-xl-4.0"))))
      (rf/reg-event-db :image/preset (fn [db [_ id]] (db/apply-preset db id)))
      (rf/reg-event-fx :image/choose-model
                       (fn [{:keys [db]} [_ id]]
@@ -139,9 +158,23 @@
         (let [[body err] (db/image-job-body db)]
           (cond
             (not (db/image-ready? db)) {:db db}
+            (get-in db [:image :free?])
+            {:db (db/begin-image db)
+             :fx [[:image/free {:model (get-in db [:image :model]) :prompt (get-in db [:image :prompt])
+                                :publication_consent "public-examples-v1"}]]}
             err {:db (db/image-failed db err)}
             :else {:db (db/begin-image db)
                    :fx [[:image/generate body]]}))))
+
+     (rf/reg-fx :image/free
+                (fn [body]
+                  (net/submit-free-image!
+                   {:body body :on-ok #(rf/dispatch [:image/free-result %])
+                    :on-error #(rf/dispatch [:image/failed %])})))
+     (rf/reg-event-fx :image/free-result
+                      (fn [{:keys [db]} [_ result]]
+                        (let [next-db (db/free-image-result db result)]
+                          {:db next-db :fx [[:works/persist (db/works-for-storage next-db)]]})))
 
      (rf/reg-fx
       :image/generate

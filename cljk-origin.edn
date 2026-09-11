@@ -17,6 +17,8 @@
   "scripts/verify-e2e.cljk" ".cljs"
   "src/oppai/gen/app.cljk" ".cljc"
   "src/oppai/gen/chat.cljk" ".cljc"
+  "src/oppai/gen/billing.cljk" ".cljc"
+  "test/oppai/gen/billing_test.cljk" ".cljc"
   "src/oppai/gen/db.cljk" ".cljc"
   "src/oppai/gen/events.cljk" ".cljc"
   "src/oppai/gen/fleet.cljk" ".cljc"

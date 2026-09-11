@@ -7,15 +7,15 @@
 (deftest the-shell-is-a-dads-document
   (let [html (site/render-html)]
     (is (str/starts-with? html "<!DOCTYPE html>"))
-    (is (str/includes? html "<html lang=\"ja\">"))
+    (is (str/includes? html "<html lang=\"ja\" data-theme=\"dark\">"))
     (is (str/includes? html "<div id=\"app\"></div>"))
     (is (re-find #"<script src=\"/assets/main[^\"]*\.js\">" html))
     ;; jp-go-dds inlines the bundle — a <link> would mean the port did not
     ;; actually happen.
     (is (not (str/includes? html "rel=\"stylesheet\"")))
     (is (str/includes? html ".dads-button"))
-    ;; Shared dark inversion is included; the app chooses dark on mount.
-    (is (str/includes? html "name=\"color-scheme\" content=\"light dark\""))
+    ;; Dark is present before JavaScript runs, including browser chrome.
+    (is (str/includes? html "name=\"color-scheme\" content=\"dark\""))
     (is (str/includes? html "color-scheme: light"))
     ;; the --hig-* bridge rides along
     (is (str/includes? html "--hig-color-tint: var(--color-key-900)"))))
