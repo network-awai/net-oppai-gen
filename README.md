@@ -205,11 +205,11 @@ consent. Generated samples are explicitly reviewed and credited to Producer.
 The first two works were generated through `/api/free/image` at price 0
 (45.996 seconds / 99.418 seconds) and reviewed before publication.
 
-A Codex daily automation is planned for 09:00 Asia/Tokyo (pending approval of recurring repository updates and production deployment) to generate and
-review one character and one portrait, publish only successful reviewed works,
-and verify the deployed site. It uses free quotas only and never falls back
-to payment. This schedule runs through Codex; it is not a Worker cron.
-
+A Codex hourly automation is active to generate, review and publish at most
+one new work per run. The user explicitly authorized recurring commit, push
+and deployment. It uses only free capacity and skips when unavailable.
+This runs through Codex; the separate Itonami bot enrollment still requires
+the owner's passkey sign-in.
 
 ### Discovery and detail navigation
 

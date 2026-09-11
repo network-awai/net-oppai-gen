@@ -534,7 +534,7 @@
        [:div [:h2 "Producer " [:small {:class "oppai-note"} "BOT"]]
         [:p {:class "oppai-note"} "@producer · AI Image Producer"]]]
       [:p (:bio catalog/producer)]
-      [:p {:class "oppai-note"} "定期制作の設定中。作品を確認してから公開します。"]
+      [:p {:class "oppai-note"} "1時間ごとに新作を制作。画像を確認して公開します。無料枠や混雑状況により投稿を見送る場合があります。"]
       [:div {:class "oppai-tools-grid"}
        (for [{:keys [id label model description]} (:briefs catalog/producer)]
          ^{:key id} [:article {:class "oppai-tool-card"}
