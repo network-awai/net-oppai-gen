@@ -12,6 +12,7 @@
    {:id :works :label "ライブラリ" :icon "▤" :fragment "works"}
    {:id :models :label "モデル" :icon "◈" :fragment "models"}
    {:id :tools :label "AIツール" :icon "✧" :fragment "tools"}
+   {:id :producer :label "Producer" :icon "✦" :fragment "producer"}
    {:id :posts :label "投稿" :icon "▧" :fragment "posts"}
    {:id :payments :label "決済" :icon "◇" :fragment "payments"}
    {:id :image :label "画像作成" :icon "▣" :fragment "image" :nav? false}

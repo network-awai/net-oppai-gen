@@ -504,18 +504,19 @@
          "18 歳未満 — 離れる"]]]]))
 
 #?(:cljs
-   (defn public-gallery []
+   (defn public-gallery [& [producer-id]]
      [:section {:class "oppai-studio oppai-public-gallery" :aria-label "公開作品"}
       [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルを確認できます。"]
       (if (seq catalog/public-works)
         [:div {:class "oppai-public-grid"}
-         (for [{:keys [id title image model prompt width height]} catalog/public-works]
+         (for [{:keys [id title image model prompt width height producer]} (filter #(or (nil? producer-id) (= producer-id (:producer %))) catalog/public-works)]
            ^{:key id}
            [:article {:class "oppai-public-card"}
             [:a {:href image :target "_blank" :rel "noopener"}
              [:img {:src image :alt title :loading "lazy" :width (or width 832) :height (or height 1216)}]]
             [:div {:class "oppai-card-body"}
              [:h2 title] [:p {:class "oppai-note"} model]
+             (when producer [:a {:href "#producer" :class "oppai-note"} "✦ Producer · BOT"])
              (when prompt [:details [:summary "プロンプトを見る"] [:p prompt]])
              (ui/button "このモデルを使う" {:size "sm" :variant :primary}
                         #(rf/dispatch [:image/choose-model model]))]])]
@@ -523,6 +524,25 @@
          [:h2 "公開作品は準備中です"]
          [:p "生成が完了した作品から、こちらに掲載します。"]
          (ui/button "画像を作成" {:href "#image" :variant :primary})])]))
+
+#?(:cljs
+   (defn producer-view []
+     [:section {:class "oppai-producer" :aria-label "Producer プロフィール"}
+      [:div {:class "oppai-producer-cover"} [:span "ORIGINAL CHARACTERS & PORTRAITS"]]
+      [:div {:class "oppai-producer-identity"}
+       [:div {:class "oppai-producer-avatar" :aria-hidden "true"} "P"]
+       [:div [:h2 "Producer " [:small {:class "oppai-note"} "BOT"]]
+        [:p {:class "oppai-note"} "@producer · AI Image Producer"]]]
+      [:p (:bio catalog/producer)]
+      [:p {:class "oppai-note"} "定期制作の設定中。作品を確認してから公開します。"]
+      [:div {:class "oppai-tools-grid"}
+       (for [{:keys [id label model description]} (:briefs catalog/producer)]
+         ^{:key id} [:article {:class "oppai-tool-card"}
+                    [:h3 label] [:p description] [:p {:class "oppai-note"} model]
+                    (ui/button "この企画で作成" {:variant :primary}
+                               #(rf/dispatch [:producer/brief id]))])]
+      [:h2 "Producer の作品"]
+      [public-gallery "producer"]]))
 
 #?(:cljs
    (defn tools-view []
@@ -596,11 +616,11 @@
             [:a {:href "https://murakumo.cloud"} "murakumo.cloud ↗"]]]
           [:main {:class "oppai-home" :id "main-content"}
            [:div {:class "oppai-page-heading"}
-            [:h1 (case tab :home "ホーム" :posts "投稿" :tools "AIツール" :payments "決済"
+            [:h1 (case tab :home "ホーム" :producer "Producer" :posts "投稿" :tools "AIツール" :payments "決済"
                         :models "モデル" :image "画像作成" :douga "動画作成"
                         :face "自分の顔" :works "ライブラリ" "チャット")]]
            [:div {:class "oppai-main"}
-            (case tab :payments [payments-view] :home [public-gallery] :posts [public-gallery] :tools [tools-view]
+            (case tab :producer [producer-view] :payments [payments-view] :home [public-gallery] :posts [public-gallery] :tools [tools-view]
                   :image [image-studio] :douga [douga-studio] :face [face-view]
                   :models [models-view] :works [works-view] [chat-studio])]]
           [:footer {:class "oppai-footer"} [:p "© 2026 oppai.fans"]]]))))

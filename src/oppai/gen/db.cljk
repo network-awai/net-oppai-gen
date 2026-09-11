@@ -237,6 +237,14 @@
       (assoc-in [:image :free?] (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} (str model-id)))
       (assoc :tab :image)))
 
+(defn producer-brief [db brief-id]
+  (if-let [brief (some #(when (= brief-id (:id %)) %) (:briefs catalog/producer))]
+    (-> (choose-model db (:model brief))
+        (update :image merge {:prompt (:prompt brief) :negative "" :size "768x768"
+                              :face-ref? false :publication-consent? false
+                              :status :idle :job nil :error nil}))
+    db))
+
 ;; ---- face -------------------------------------------------------------------
 
 (defn face-status [db record]

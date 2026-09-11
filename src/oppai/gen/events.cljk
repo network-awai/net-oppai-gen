@@ -146,6 +146,10 @@
                                (not (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"}
                                                (get-in db [:image :model]))))
                           (assoc-in [:image :model] "animagine-xl-4.0"))))
+     (rf/reg-event-fx :producer/brief
+                      (fn [{:keys [db]} [_ id]]
+                        {:db (db/producer-brief db id)
+                         :fx [[:route/fragment (route/view->fragment :image)]]}))
      (rf/reg-event-db :image/preset (fn [db [_ id]] (db/apply-preset db id)))
      (rf/reg-event-fx :image/choose-model
                       (fn [{:keys [db]} [_ id]]

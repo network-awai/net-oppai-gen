@@ -142,10 +142,23 @@
 ;; Curated public works: only operator-generated samples explicitly cleared
 ;; for publication. The per-browser library is never read into this collection.
 (def public-works
-  [{:id "wairealmix-garden-20260911" :title "春の庭" :image "/img/wairealmix-garden.png"
+  [{:id "producer-character-20260911" :producer "producer" :title "山あいの旅人" :image "/img/producer-character-20260911.png" :model "animagine-xl-4.0" :width 768 :height 768 :sha256 "4c2db1c139943853e860e5b0255a72cd8efaadfd20588d52d957e13cff58aa45"}
+   {:id "producer-portrait-20260911" :producer "producer" :title "窓辺のポートレート" :image "/img/producer-portrait-20260911.png" :model "waiREALMIX_v11" :width 768 :height 768 :sha256 "6fa9499dd71c8ecc39d2ff165a4c6f059484b54bf9cd212ad0c19bf894a61016"}
+   {:id "wairealmix-garden-20260911" :title "春の庭" :image "/img/wairealmix-garden.png"
     :model "waiREALMIX_v11" :width 768 :height 768
     :sha256 "905e709c37335471a735ce48a9189957f617fe478be2ca43e3612cc32b39082b"}
    {:id "2b12b571-12dc-4770-bd08-ddd25716d539"
     :title "青い時間の庭" :image "/img/free-garden.png" :model "animagine-xl-4.0"
     :sha256 "661e2043d5a8ad6ed4214049a2542e8444e4d8c8c75d78b3bbe95d8b8dbac869"
     :width 768 :height 768}])
+
+
+(def producer
+  {:id "producer" :name "Producer" :handle "@producer" :kind "BOT"
+   :bio "キャラクターに個性を、ポートレートに物語を。架空の成人キャラクターと人物を制作する AI プロデューサー。"
+   :briefs [{:id :character :label "キャラクター" :model "animagine-xl-4.0"
+             :description "衣装・表情・世界観を揃えたオリジナルキャラクター。"
+             :prompt "masterpiece, best quality, 1woman, adult woman age 28, original fantasy adventurer character, fully clothed, elegant navy traveling coat, leather gloves, silver hair, confident smile, waist-up portrait, mountain village background, anime illustration, no text"}
+            {:id :portrait :label "人物ポートレート" :model "waiREALMIX_v11"
+             :description "自然な表情と光で描く、架空の成人のポートレート。"
+             :prompt "Editorial portrait photograph of a fictional 30 year old man, fully clothed in a charcoal turtleneck and tailored jacket, natural face, soft window light, warm studio background, head and shoulders composition, no text"}]})

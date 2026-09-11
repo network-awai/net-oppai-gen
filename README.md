@@ -194,3 +194,18 @@ or login change was needed.
 - Public sample SHA256 matches the reviewed image above.
 - Frontend: 69 tests / 389 assertions passed; both builds passed. Upstream
   free Preview and signed-credit integration tests passed on deployed main.
+
+
+### Producer bot
+
+`#producer` is the public AI producer profile with character and portrait
+briefs, free model selection, and a portfolio filtered by `:producer "producer"`.
+Starting a brief clears face-reference state and asks for fresh publication
+consent. Generated samples are explicitly reviewed and credited to Producer.
+The first two works were generated through `/api/free/image` at price 0
+(45.996 seconds / 99.418 seconds) and reviewed before publication.
+
+A Codex daily automation is planned for 09:00 Asia/Tokyo (pending approval of recurring repository updates and production deployment) to generate and
+review one character and one portrait, publish only successful reviewed works,
+and verify the deployed site. It uses free quotas only and never falls back
+to payment. This schedule runs through Codex; it is not a Worker cron.

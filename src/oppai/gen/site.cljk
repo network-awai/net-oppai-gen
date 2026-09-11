@@ -544,6 +544,13 @@
 .oppai-tool-card h2 {font-size:1.125rem;}
 .oppai-tool-card p {font-size:.875rem;color:var(--hig-color-secondary-label);}
 .oppai-public-gallery {width:100%;}
+.oppai-producer {width:100%;max-width:1100px;}
+.oppai-producer-cover {min-height:150px;border-radius:18px;background:linear-gradient(125deg,var(--hig-palette-blue),var(--hig-palette-purple),var(--hig-palette-cyan));display:flex;align-items:flex-end;padding:24px;color:white;font-weight:700;letter-spacing:.12em;}
+.oppai-producer-identity {display:flex;align-items:center;gap:18px;margin:24px 0;}
+.oppai-producer-avatar {display:grid;place-items:center;width:72px;height:72px;border-radius:22px;background:var(--hig-color-tint);color:var(--hig-color-label);font-size:38px;font-weight:800;flex-shrink:0;}
+.oppai-producer .oppai-tools-grid {margin:28px 0;}
+.oppai-producer h2 {margin:12px 0;}
+
 .oppai-public-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
 .oppai-public-card {border-radius:14px;overflow:hidden;background:var(--hig-color-system-background);border:1px solid var(--hig-color-separator);}
 .oppai-public-card img {width:100%;height:auto;display:block;}
