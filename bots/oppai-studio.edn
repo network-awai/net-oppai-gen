@@ -1,0 +1,236 @@
+;; bots/oppai-studio.edn — the oppai.fans studio bot: what it renders, where, how
+;; explicit it goes, and what it will never render. Read by
+;; `oppai.gen.bot` (pure: composition, policy, placement, quality) and driven
+;; by `scripts/oppai_studio_tick.cljk` (I/O: ssh, ComfyUI, ledger).
+;;
+;; ADR: com-junkawasaki/root 90-docs/adr/2609117000-oppai-studio-bot-and-fleet-media-placement
+;;
+;; Every prompt this bot composes names an ADULT explicitly (`:adult-markers` is
+;; a required bank, not an optional one), and every prompt is passed through
+;; `oppai.gen.guard/minor?` plus this file's `:forbidden` before it leaves the
+;; operator machine. The banks below are explicit by design — this is the
+;; point of the site — and the boundary is not "how explicit" but "who":
+;; adults, fictional, consenting. See `:policy`.
+{:bot/id "oppai-studio"
+ :bot/version 1
+ :bot/site "oppai.fans"
+ :bot/owner "network-awai/fans-oppai"
+
+ ;; ---- placement: lane -> model -> nodes ---------------------------------------
+ ;; Nodes are the murakumo fleet (kotoba-lang/murakumo fleet.edn `:node/serves`,
+ ;; 2026-09-11). A lane's :nodes MUST agree with that declaration — the test
+ ;; `placement-matches-fleet-declaration` pins the pairing, so a node that is
+ ;; re-declared for something else turns this file red rather than silently
+ ;; sending the wrong graph to it.
+ :bot/lanes
+ [{:lane/id :real-mix
+   :lane/kind :txt2img
+   :lane/model "waiREALMIX_v11"
+   :lane/checkpoint "waiREALMIX_v11.safetensors"
+   :lane/nodes ["benjamin" "simeon"]
+   :lane/prompt-style :natural
+   :lane/quality "photorealistic, (best quality:1.2), detailed skin, natural lighting, 8k, raw photo"
+   :lane/negative "lowres, bad anatomy, bad hands, extra fingers, worst quality, watermark, text, cartoon, anime, 3d render"
+   :lane/sizes ["832x1216" "896x1152" "1024x1024"]
+   :lane/steps 26
+   :lane/cfg 6.0
+   :lane/share 0.30}
+  {:lane/id :real-cn
+   :lane/kind :txt2img
+   :lane/model "waiREALCN_v150"
+   :lane/checkpoint "waiREALCN_v150.safetensors"
+   :lane/nodes ["dan" "joseph"]
+   :lane/prompt-style :natural
+   :lane/quality "photorealistic, (best quality:1.2), sharp focus, detailed face, east asian woman, natural skin texture"
+   :lane/negative "lowres, bad anatomy, bad hands, extra fingers, worst quality, watermark, text, cartoon, anime, 3d render"
+   :lane/sizes ["832x1216" "896x1152"]
+   :lane/steps 26
+   :lane/cfg 6.0
+   :lane/share 0.30}
+  {:lane/id :anime
+   :lane/kind :txt2img
+   :lane/model "waiIllustriousSDXL_v150"
+   :lane/checkpoint "waiIllustriousSDXL_v150.safetensors"
+   :lane/nodes ["zebulun"]
+   :lane/prompt-style :tags
+   :lane/quality "masterpiece, best quality, very aesthetic, absurdres, newest"
+   :lane/negative "lowres, worst quality, low quality, bad anatomy, bad hands, watermark, signature, jpeg artifacts"
+   :lane/sizes ["832x1216" "1024x1024"]
+   :lane/steps 28
+   :lane/cfg 5.5
+   :lane/share 0.15}
+  ;; text-to-video on the LTX distilled 2B the two minis hold; the prompt is a
+  ;; natural-language sentence (LTX is a T5 model, not a tag model).
+  {:lane/id :video-ltx
+   :lane/kind :ltx-t2v
+   :lane/model "ltxv-2b-0.9.6-distilled-04-25"
+   :lane/checkpoint "ltxv-2b-0.9.6-distilled-04-25.safetensors"
+   :lane/clip "t5xxl_fp8_e4m3fn_scaled.safetensors"
+   :lane/nodes ["naphtali" "issachar"]
+   :lane/prompt-style :natural
+   :lane/quality "cinematic, soft light, slow camera, 24fps, detailed skin"
+   :lane/negative "worst quality, blurry, jittery, distorted, deformed, text, watermark"
+   :lane/seconds 3
+   :lane/fps 24
+   :lane/width 704 :lane/height 480
+   :lane/steps 8
+   :lane/cfg 3.0
+   :lane/share 0.10}
+  ;; image-to-video on asher's SVD-XT: it animates an image a txt2img lane
+  ;; already passed; no prompt of its own.
+  {:lane/id :video-svd
+   :lane/kind :svd-i2v
+   :lane/model "svd_xt"
+   :lane/checkpoint "svd_xt.safetensors"
+   :lane/nodes ["asher"]
+   :lane/source-lanes [:real-mix :real-cn]
+   :lane/seconds 2
+   :lane/fps 12
+   :lane/width 576 :lane/height 1024
+   :lane/steps 20
+   :lane/share 0.05}
+  ;; voice lines: Qwen3-TTS over mlx-audio on the two audio minis. Japanese,
+  ;; adult, short. The text bank is `:voice-lines`.
+  {:lane/id :voice
+   :lane/kind :tts
+   :lane/model "qwen3-tts"
+   :lane/mlx-repo "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16"
+   ;; CustomVoice needs a speaker name; ono_anna is the model's Japanese female
+   ;; voice. Measured on levi 2026-09-11: a 4.4 s line in 8 s wall (CLI, cold
+   ;; model load included), 24 kHz mono, rms 1269 — not silence.
+   :lane/voice "ono_anna"
+   :lane/nodes ["judah" "levi"]
+   :lane/share 0.05}
+  ;; 10Eros-Max (MiniMax-H3 finetune) — gad only, through the generation API's
+  ;; job queue on gad's loopback (:8081), never through the public origin.
+  {:lane/id :eros-h3
+   :lane/kind :generation-api-video
+   :lane/model "10eros-max"
+   :lane/nodes ["gad"]
+   :lane/prompt-style :natural
+   :lane/seconds 3
+   :lane/width 512 :lane/height 512
+   :lane/share 0.05}]
+
+ ;; ---- policy --------------------------------------------------------------------
+ :bot/policy
+ {;; Every composed prompt carries one of these, verbatim. A prompt without an
+  ;; adult marker is not composed — `oppai.gen.bot/compose` throws.
+  :adult-markers ["adult woman" "mature woman" "25 years old woman" "30 years old woman"
+                  "office lady in her late 20s" "young adult woman (25+)"]
+  :adult-tags ["1girl, adult, mature female, 25yo" "1girl, adult woman, 28yo, mature female"
+               "1girl, milf, mature female, 32yo" "1girl, adult, office lady, 27yo"]
+  ;; Substrings (lower-cased) that must not appear in a composed prompt, on top
+  ;; of guard/minor-terms. These are the site's own boundary: no non-consent,
+  ;; no violence, no bestiality, no real people, no family-relation framing.
+  ;; A bank entry containing any of these fails `validate-profile`, so the
+  ;; boundary is on the vocabulary, not only on the output. Single words match
+  ;; as whole tokens (so "dog" does not fire on "doggystyle"); phrases match
+  ;; as substrings.
+  :forbidden ["rape" "raped" "forced" "non-consensual" "nonconsensual" "unconscious" "sleeping"
+              "drugged" "drunk" "hypno" "mind control" "blood" "gore" "guro" "torture" "crying in pain"
+              "bestiality" "animal" "dog" "horse" "tentacle" "necro" "corpse" "scat" "vomit"
+              "sister" "brother" "mother" "daughter" "father" "son" "incest" "stepsister" "stepmother" "stepdaughter"
+              "real person" "celebrity" "actress name" "idol name"
+              "student" "school uniform" "seifuku" "classroom" "flat chest" "petite"]
+  ;; Appended to every job's negative prompt (in addition to guard/minor-negative).
+  :negative-floor "child, loli, shota, teen, underage, minor, young girl, petite, flat chest, school uniform, gore, blood, animal, deformed"}
+
+ ;; ---- vocabulary banks -------------------------------------------------------
+ ;; Each entry has :tags (Danbooru-style, for :tags lanes) and :natural (a
+ ;; phrase, for :natural lanes). The composer picks one entry per bank with a
+ ;; seeded PRNG, so a (profile, seed) pair always yields the same prompt.
+ :bot/banks
+ {:body
+  [{:tags "large breasts, curvy, wide hips, thick thighs" :natural "with large breasts and a curvy figure"}
+   {:tags "huge breasts, plump, soft body" :natural "with huge soft breasts and a plump body"}
+   {:tags "large breasts, slim waist, long legs" :natural "with large breasts, a slim waist and long legs"}
+   {:tags "medium breasts, athletic, toned" :natural "with an athletic toned body"}
+   {:tags "gigantic breasts, hourglass figure" :natural "with an hourglass figure and enormous breasts"}]
+
+  :look
+  [{:tags "long black hair, brown eyes, japanese" :natural "long black hair and brown eyes"}
+   {:tags "short brown hair, glasses" :natural "short brown hair and glasses"}
+   {:tags "long blonde hair, blue eyes" :natural "long blonde hair and blue eyes"}
+   {:tags "silver hair, ponytail, red lips" :natural "silver hair in a ponytail, red lipstick"}
+   {:tags "dark skin, wavy hair, freckles" :natural "dark skin, wavy hair and freckles"}
+   {:tags "pink hair, twin drills, purple eyes" :natural "pink hair in twin drills, purple eyes"}]
+
+  :outfit
+  [{:tags "nude, completely nude, nipples" :natural "completely nude"}
+   {:tags "lingerie, lace bra, garter belt, stockings" :natural "in black lace lingerie with a garter belt and stockings"}
+   {:tags "micro bikini, wet, beach" :natural "in a wet micro bikini"}
+   {:tags "topless, panties only, bottomless" :natural "topless, wearing only panties"}
+   {:tags "open shirt, no bra, cleavage, unbuttoned" :natural "in an unbuttoned white shirt with no bra"}
+   {:tags "office suit, pencil skirt, pantyhose, unbuttoned blouse" :natural "in an office suit with the blouse unbuttoned"}
+   {:tags "yukata, off shoulder, exposed breasts" :natural "in a loose yukata slipping off her shoulders"}
+   {:tags "maid outfit, cleavage cutout, thighhighs" :natural "in a maid outfit with a cleavage cutout"}]
+
+  ;; Explicit acts — consenting adults, solo or with an adult male partner.
+  ;; This is the explicit core of the site (owner request: ahegao, bukkake ...).
+  :act
+  [{:tags "ahegao, rolling eyes, tongue out, drooling, heart-shaped pupils, orgasm face" :natural "making an ahegao face, eyes rolled back and tongue out, mid-orgasm"}
+   {:tags "bukkake, cum on face, cum on breasts, cum on body, multiple boys, facial" :natural "bukkake, covered in cum on her face and breasts"}
+   {:tags "paizuri, penis between breasts, cum on breasts, 1boy" :natural "paizuri, squeezing a cock between her breasts"}
+   {:tags "fellatio, deepthroat, penis, 1boy, saliva" :natural "giving a sloppy blowjob"}
+   {:tags "sex, vaginal, cowgirl position, riding, 1boy, motion lines" :natural "riding a man in cowgirl position"}
+   {:tags "sex, from behind, doggystyle, ass grab, 1boy" :natural "having sex from behind, doggy style"}
+   {:tags "sex, missionary, spread legs, penis, 1boy, cum in pussy, creampie" :natural "in missionary, legs spread, creampie"}
+   {:tags "masturbation, fingering, spread legs, pussy juice, blush" :natural "masturbating with her legs spread"}
+   {:tags "breast grab, nipple tweak, breasts squeezed, 1boy, blush" :natural "her breasts squeezed and nipples pinched"}
+   {:tags "after sex, cum drip, cum on stomach, lying, exhausted" :natural "after sex, exhausted, cum dripping onto her stomach"}
+   {:tags "titfuck, breast press, cum on breasts, 1boy, pov" :natural "a POV titfuck ending on her breasts"}
+   {:tags "ahegao, bukkake, cum on face, cum on hair, multiple boys, tongue out" :natural "an ahegao bukkake — eyes rolled back, tongue out, face and hair dripping"}]
+
+  :expression
+  [{:tags "blush, moaning, half-closed eyes" :natural "blushing and moaning"}
+   {:tags "seductive smile, looking at viewer" :natural "with a seductive smile, looking at the camera"}
+   {:tags "embarrassed, looking away, blush" :natural "embarrassed and looking away"}
+   {:tags "lustful, biting lip, eye contact" :natural "biting her lip with lustful eye contact"}
+   {:tags "ahegao, crossed eyes, tongue out" :natural "eyes crossed and tongue out"}]
+
+  :scene
+  [{:tags "bedroom, on bed, sheets, dim light" :natural "on a bed in a dim bedroom"}
+   {:tags "love hotel, mirror, neon light" :natural "in a love hotel room with neon light and a mirror"}
+   {:tags "onsen, steam, wet hair, rocks" :natural "at an outdoor onsen in the steam"}
+   {:tags "office, desk, night, city lights" :natural "on an office desk at night with the city lights behind"}
+   {:tags "shower, wet, water drops, tiles" :natural "in the shower, wet, water running down"}
+   {:tags "beach, sunset, sand, wet skin" :natural "on a beach at sunset with wet skin"}
+   {:tags "living room, sofa, afternoon light" :natural "on a sofa in warm afternoon light"}
+   {:tags "car interior, back seat, night" :natural "in the back seat of a car at night"}]
+
+  :camera
+  [{:tags "from above, looking at viewer" :natural "shot from above"}
+   {:tags "pov, close-up" :natural "POV close-up"}
+   {:tags "full body, wide shot" :natural "full-body wide shot"}
+   {:tags "from below, low angle" :natural "low angle from below"}
+   {:tags "from side, cowboy shot" :natural "cowboy shot from the side"}
+   {:tags "close-up, face focus, depth of field" :natural "close-up on her face with shallow depth of field"}]
+
+  ;; short Japanese lines for the voice lane; adult, first person, consenting
+  :voice-lines
+  [{:text "んっ……もっと、ぎゅってして。" :natural "a breathy moan asking to be held tighter"}
+   {:text "はぁ……気持ちいい……そこ、いいの。" :natural "a soft moan saying it feels good there"}
+   {:text "ねぇ、今夜はずっと一緒にいて。" :natural "asking to stay together all night"}
+   {:text "ふふ、見てるだけでいいの？触ってもいいんだよ。" :natural "teasing: you can touch, not only look"}
+   {:text "あぁっ……だめ、声、出ちゃう……" :natural "a moan about not being able to keep quiet"}
+   {:text "おっぱい、好きなだけ……いいよ。" :natural "offering her breasts, as much as you like"}]}
+
+ ;; ---- scheduling ---------------------------------------------------------------
+ :bot/schedule
+ {:tick-s 300                 ; launchd StartInterval
+  :per-node-queue-max 2       ; never more than this many jobs queued on one ComfyUI
+  :image-steps-max 50
+  :seed-base 20260911}        ; job n of lane L has seed = seed-base + n*7 + lane-index
+
+ ;; ---- output --------------------------------------------------------------------
+ :bot/output
+ {:dir "~/.itonami/oppai-studio"   ; out/<node>/… + receipts.edn (append-only) + pending.edn
+  ;; Quality floors per kind. An artifact under a floor is :fail and is never
+  ;; promoted; the floors are the same shape as shinshi-catalog-video's.
+  :quality {:image {:min-bytes 120000 :min-side 512}
+            :video {:min-bytes 80000}
+            :audio {:min-bytes 20000 :min-seconds 0.8}}
+  ;; Promotion into `oppai.gen.catalog/public-works` is a separate, human step
+  ;; (README: only operator-cleared samples). The bot writes candidates only.
+  :promote :manual}}
