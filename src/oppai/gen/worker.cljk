@@ -353,7 +353,7 @@
             :upstream generation-upstream}}
    200))
 
-(defn- free-image! [request]
+(defn- free-image! [request env]
   (-> (.json request)
       (.then (fn [raw]
                (let [prompt (gobj/get raw "prompt") consent (gobj/get raw "publication_consent")
@@ -365,7 +365,10 @@
                    ;; No generation token and no billing identity on the free lane.
                    ;; The upstream retains its network/day quota and concurrency gate.
                    (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
-                             #js {:method "POST" :headers #js {"content-type" "application/json"}
+                             #js {:method "POST" :headers (clj->js
+                                  (cond-> {"content-type" "application/json"}
+                                    (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN")
+                                    (assoc "x-preview-sponsor" (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN"))))
                                   :signal (js/AbortSignal.timeout 120000)
                                   :body (js/JSON.stringify #js {:model profile :prompt prompt
                                                               :publication_consent consent})})))))
@@ -401,7 +404,7 @@
         (error-response "forbidden_origin" "this endpoint serves oppai.fans only" 403)
         (cond
           (= "/api/free/image" path)
-          (if (= "POST" method) (free-image! request)
+          (if (= "POST" method) (free-image! request env)
               (error-response "method_not_allowed" "POST only" 405))
 
           (= "/api/payments" path)

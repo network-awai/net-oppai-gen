@@ -236,3 +236,14 @@ image contents. Operator-owned prompts can be reused from post details.
 Six images were generated and visually reviewed before publication: three
 Animagine and three WAI, each with price 0. Generation time ranged from
 54.604 to 105.810 seconds. Both model quotas returned remaining=0.
+
+
+### Sponsored free quota
+
+oppai.fans uses the server-only OPPAI_PREVIEW_SPONSOR_TOKEN to receive
+24 image requests per model/network/UTC-day from Murakumo Preview.
+The ordinary anonymous allowance remains 5. The provider retains its
+100/day per-model shared capacity and single-model concurrency lease.
+No payment token is used and no client-supplied sponsor header is forwarded.
+The hourly Producer automation is authorized to commit, push and deploy
+reviewed works; it skips when free capacity is unavailable.
