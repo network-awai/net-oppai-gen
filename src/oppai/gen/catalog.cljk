@@ -138,3 +138,7 @@
          (filter #(or (empty? q)
                       (str/includes? (str/lower (str (:name %) " " (:id %) " " (:base %))) q)))
          vec)))
+
+;; Curated public works: only operator-generated samples explicitly cleared
+;; for publication. The per-browser library is never read into this collection.
+(def public-works [])

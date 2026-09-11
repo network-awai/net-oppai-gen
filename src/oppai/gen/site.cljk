@@ -6,9 +6,8 @@
   external requests is the design system's stated goal, and this app is a
   single document, so one inlined bundle beats several render-blocking links.
 
-  DADS is light-only (upstream ships no dark palette and `jp-go-dds.page` pins
-  `color-scheme: light`). There is no theme map here and no dark branch to
-  keep in sync; do not add one.
+  The discovery interface uses jp-go-dds dark inversion, with the same shared
+  tokens as the generation forms.
 
   Regenerate with `npm run generate-site` (nbb; no JVM).
 
@@ -498,7 +497,7 @@
 .oppai-availability-filter input {width:18px;height:18px;accent-color:var(--hig-color-tint);}
 .oppai-filter-row {display:flex;align-items:center;gap:8px;margin-bottom:22px;}
 .oppai-filter {border:1px solid var(--hig-color-separator);border-radius:24px;background:var(--hig-color-system-background);color:var(--hig-color-label);padding:10px 20px;min-height:44px;cursor:pointer;}
-.oppai-filter[aria-pressed=true] {background:var(--hig-color-tint);border-color:var(--hig-color-tint);color:var(--hig-color-on-tint, white);}
+.oppai-filter[aria-pressed=true] {background:var(--hig-color-tint);border-color:var(--hig-color-tint);color:var(--color-neutral-white);}
 .oppai-filter:focus-visible {outline:3px solid var(--hig-color-tint);outline-offset:3px;}
 .oppai-result-count {margin-left:auto;color:var(--hig-color-secondary-label);font-size:.8rem;}
 .oppai-cards {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;}
@@ -524,6 +523,60 @@
 @media(max-width:1250px){.oppai-cards{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:720px){.oppai-shell{grid-template-columns:1fr;}.oppai-header{padding:12px 16px;gap:12px;}.oppai-header-caption{display:none;}.oppai-sidebar{padding:8px 12px;border-right:0;border-bottom:1px solid var(--hig-color-separator);}.oppai-sidebar-label,.oppai-sidebar-note{display:none;}.oppai-tabs{flex-direction:row;overflow-x:auto;gap:4px;}.oppai-tab{padding:10px 12px;white-space:nowrap;}.oppai-home{padding:20px 16px;}.oppai-page-heading{display:block;}.oppai-page-heading>.oppai-note{display:none;}.oppai-discover-banner{padding:20px;}.oppai-discover-banner img{width:56px;height:56px;}.oppai-discover-banner h2{font-size:1.1rem;}.oppai-discover-banner p{font-size:.75rem;}.oppai-catalog-toolbar{flex-wrap:wrap;gap:8px;}.oppai-catalog-toolbar>.dads-input-text{flex-basis:100%;}.oppai-footer{grid-column:1;padding:20px 16px;}.oppai-cards{gap:12px;}.oppai-card-body{padding:14px;}}
 @media(max-width:450px){.oppai-cards{grid-template-columns:1fr;}.oppai-brand-logo{width:145px;height:auto;}.oppai-discover-banner img{display:none;}}
+/* Compact discovery UI on handheld screens. */
+.oppai-page-heading h1 {margin:0;font-size:1.5rem;}
+.oppai-mobile-menu {display:none;}
+.oppai-search-shortcut {color:var(--hig-color-label);font-size:1.75rem;text-decoration:none;min-width:40px;min-height:44px;display:grid;place-items:center;}
+.oppai-brand-logo {filter:none;}
+.oppai-discover-banner {display:none;}
+.oppai-tools-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
+.oppai-tool-card {display:block;border:1px solid var(--hig-color-separator);background:var(--hig-color-system-background);border-radius:16px;padding:24px;color:var(--hig-color-label);text-decoration:none;}
+.oppai-tool-card>span {font-size:2rem;}
+.oppai-tool-card h2 {font-size:1.125rem;}
+.oppai-tool-card p {font-size:.875rem;color:var(--hig-color-secondary-label);}
+.oppai-public-gallery {width:100%;}
+.oppai-public-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;}
+.oppai-public-card {border-radius:14px;overflow:hidden;background:var(--hig-color-system-background);border:1px solid var(--hig-color-separator);}
+.oppai-public-card img {width:100%;height:auto;display:block;}
+.oppai-public-card h2 {font-size:1rem;margin:0;}
+.oppai-public-card details {font-size:.75rem;overflow-wrap:anywhere;}
+@media(max-width:720px){
+ .oppai-header {flex-direction:row;align-items:center;flex-wrap:nowrap;padding:8px 12px;gap:8px;min-height:60px;}
+ .oppai-header .dads-button {min-width:0;min-height:40px;padding:8px 14px;font-size:.875rem;white-space:nowrap;}
+ .oppai-brand-logo {width:104px;height:auto;}
+ .oppai-header .oppai-brand {flex:1;}
+ .oppai-mobile-menu {display:block;position:relative;}
+ .oppai-mobile-menu summary {cursor:pointer;list-style:none;width:40px;min-height:44px;display:grid;place-items:center;font-size:1.35rem;}
+ .oppai-mobile-menu summary::-webkit-details-marker {display:none;}
+ .oppai-drawer {position:fixed;top:60px;left:0;bottom:0;width:min(280px,85vw);z-index:20;padding:20px 12px;background:var(--hig-color-system-background);border-right:1px solid var(--hig-color-separator);box-shadow:var(--hig-shadow-2);}
+ .oppai-drawer .oppai-tabs {flex-direction:column;overflow:visible;}
+ .oppai-sidebar {display:none;}
+ .oppai-home {padding:22px 12px;}
+ .oppai-page-heading {margin-bottom:20px;}
+ .oppai-models {gap:8px;}
+ .oppai-catalog-toolbar {margin-bottom:4px;gap:4px;}
+ .oppai-availability-filter {font-size:.75rem;}
+ .oppai-filter-row {margin-bottom:10px;gap:6px;}
+ .oppai-filter {padding:7px 14px;min-height:40px;font-size:.8rem;}
+ .oppai-cards,.oppai-public-grid {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+ .oppai-model-cover {aspect-ratio:3/4;}
+ .oppai-cover-orbit {font-size:6rem;}
+ .oppai-cover-style {font-size:.8rem;left:10px;}
+ .oppai-cover-type {font-size:.55rem;left:10px;}
+ .oppai-model-cover small {font-size:.55rem;left:10px;right:10px;}
+ .oppai-card-body {padding:10px;gap:6px;}
+ .oppai-card-title {font-size:.8rem;}
+ .oppai-card-lead {display:none;}
+ .oppai-card-meta {font-size:.6rem;}
+ .oppai-card details {font-size:.7rem;margin:0;}
+ .oppai-card-actions {padding-top:4px;gap:6px;}
+ .oppai-card-actions .dads-button {width:100%;min-width:0;min-height:38px;padding:6px;font-size:.75rem;}
+ .oppai-tools-grid {gap:10px;}
+ .oppai-tool-card {padding:16px;}
+ .oppai-tool-card h2 {font-size:1rem;}
+ .oppai-public-card h2 {font-size:.8rem;}
+}
+
 ")
 
 (defn render-css []
@@ -547,6 +600,7 @@
   ([css-text bundle]
    (dds-page/->page
     {:title page-title
+     :dark? true
      :lang "ja"
      :description page-description
      :css css-text

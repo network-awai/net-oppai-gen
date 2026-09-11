@@ -10,7 +10,7 @@
 (def tabs
   "The nav. Generated from the route table so a view cannot exist without an
   address (ADR-2608080100)."
-  route/views)
+  (vec (remove #(false? (:nav? %)) route/views)))
 
 (def welcome
   (str "oppai.fans へようこそ。\n\n"
@@ -82,7 +82,8 @@
                        :video fleet/video-models
                        :text nil
                        :ts (now-ms)})
-        (update-in [:image :model] #(or % (catalog/default-model live)))
+        (update-in [:image :model] #(or % (when (some #{(:default parsed)} live) (:default parsed))
+                                       (catalog/default-model live)))
         (update-in [:image :face-mode]
                    (fn [m] (if (some #{m} (:face-modes parsed)) m
                                (or (first (:face-modes parsed)) "plus-face")))))))

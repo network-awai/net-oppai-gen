@@ -16,6 +16,7 @@
 
 #?(:cljs
    (defn init []
+     (.setAttribute (.-documentElement js/document) "data-theme" "dark")
      (rf/dispatch-sync [:app/initialize])
      (.addEventListener js/window "hashchange"
                         (fn [_] (rf/dispatch [:ui/fragment js/location.hash])))

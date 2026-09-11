@@ -303,7 +303,7 @@
         [:p {:class "oppai-note"} hint (when face-friendly? " 顔参照に対応。")]]
        [:div {:class "oppai-card-actions"}
         [:span {:class "oppai-note"}
-         (case available? true "● 利用可能" false "未搭載" "搭載状況未確認")]
+         (case available? true "● 搭載済み" false "未搭載" "搭載状況未確認")]
         (ui/button "生成する →" {:variant :primary :size "sm" :disabled (not (true? available?))}
                    #(rf/dispatch [:image/choose-model id]))]]]))
 
@@ -329,7 +329,7 @@
              [:label {:class "oppai-availability-filter"}
               [:input {:type "checkbox" :checked @available-only
                        :on-change #(reset! available-only (.. % -target -checked))}]
-              "利用可能のみ"]]
+              "搭載済みのみ"]]
             [:div {:class "oppai-filter-row" :role "group" :aria-label "スタイルで絞り込み"}
              (for [[k label] [[:all "すべて"] [:realistic "写実"] [:anime "アニメ"]]]
                ^{:key k} [:button {:type "button" :class "oppai-filter"
@@ -487,38 +487,72 @@
          "18 歳未満 — 離れる"]]]]))
 
 #?(:cljs
+   (defn public-gallery []
+     [:section {:class "oppai-studio oppai-public-gallery" :aria-label "公開作品"}
+      [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルとプロンプトを確認できます。"]
+      (if (seq catalog/public-works)
+        [:div {:class "oppai-public-grid"}
+         (for [{:keys [id title image model prompt]} catalog/public-works]
+           ^{:key id}
+           [:article {:class "oppai-public-card"}
+            [:a {:href image :target "_blank" :rel "noopener"}
+             [:img {:src image :alt title :loading "lazy" :width 832 :height 1216}]]
+            [:div {:class "oppai-card-body"}
+             [:h2 title] [:p {:class "oppai-note"} model]
+             [:details [:summary "プロンプトを見る"] [:p prompt]]
+             (ui/button "このモデルを使う" {:size "sm" :variant :primary}
+                        #(rf/dispatch [:image/choose-model model]))]])]
+        [:div {:class "oppai-empty"}
+         [:h2 "公開作品は準備中です"]
+         [:p "生成が完了した作品から、こちらに掲載します。"]
+         (ui/button "画像を作成" {:href "#image" :variant :primary})])]))
+
+#?(:cljs
+   (defn tools-view []
+     [:section {:class "oppai-studio" :aria-label "AIツール"}
+      [:div {:class "oppai-tools-grid"}
+       (for [[url icon title description] [["#image" "▣" "画像作成" "モデルとプロンプトから画像を生成"]
+                                            ["#douga" "▶" "動画作成" "テキストや画像から動画を生成"]
+                                            ["#face" "◉" "自分の顔" "カメラで本人の顔を登録"]
+                                            ["#chat" "◇" "チャット" "アイデアやプロンプトを相談"]]]
+         ^{:key url} [:a {:href url :class "oppai-tool-card"}
+                     [:span {:aria-hidden "true"} icon]
+                     [:h2 title] [:p description] [:strong "開く →"]])]]))
+
+#?(:cljs
    (defn app []
      (if-not @(rf/subscribe [:age-confirmed?])
        [age-gate]
-       (let [tab @(rf/subscribe [:tab])]
+       (let [tab @(rf/subscribe [:tab])
+             active (if (contains? #{:image :douga :face :chat} tab) :tools tab)]
          [:div {:class "oppai-shell"}
           [:header {:class "oppai-header"}
-           [:a {:class "oppai-brand" :href "#models" :aria-label "oppai.fans モデル一覧"}
-            [:img {:class "oppai-brand-logo" :src "/img/oppai-logo.svg"
+           [:details {:class "oppai-mobile-menu"
+                      :on-key-down #(when (= "Escape" (.-key %))
+                                      (.removeAttribute (.-currentTarget %) "open"))}
+            [:summary {:aria-label "メニューを開く"} "☰"]
+            [:div {:class "oppai-drawer" :on-click #(when (.closest (.-target %) "a")
+                                                     (.removeAttribute (.closest (.-currentTarget %) "details") "open"))}
+             (ui/tab-bar {:items db/tabs :active active})]]
+           [:a {:class "oppai-brand" :href "#home" :aria-label "oppai.fans ホーム"}
+            [:img {:class "oppai-brand-logo" :src "/img/oppai-logo-dark.svg"
                    :alt "oppai.fans" :width 220 :height 48}]]
-           [:span {:class "oppai-header-caption"} "Discover your next creation."]
-           (ui/button "＋ 画像を作成" {:variant :primary :href "#image"})]
+           [:a {:class "oppai-search-shortcut" :href "#models" :aria-label "モデルを検索"} "⌕"]
+           [:span {:class "oppai-header-caption"} "Create. Explore. Share."]
+           (ui/button "＋ 作成" {:variant :primary :href "#image"})]
           [:aside {:class "oppai-sidebar"}
-           [:p {:class "oppai-sidebar-label"} "WORKSPACE"]
-           (ui/tab-bar {:items db/tabs :active tab})
+           (ui/tab-bar {:items db/tabs :active active})
            [:div {:class "oppai-sidebar-note"}
             (ui/chip "18+" {:color "gray"})
             [:p "モデルを選んで、アイデアをかたちに。"]
-            [:a {:href "https://murakumo.cloud"} "Powered by murakumo ↗"]]]
+            [:a {:href "https://murakumo.cloud"} "murakumo.cloud ↗"]]]
           [:main {:class "oppai-home" :id "main-content"}
            [:div {:class "oppai-page-heading"}
-            [:div
-             [:p {:class "oppai-eyebrow"} "OPPAI / CREATIVE STUDIO"]
-             [:h1 (case tab :models "モデルを探す" :image "画像を作成"
-                         :douga "動画を作成" :face "自分の顔を登録"
-                         :works "マイライブラリ" "チャット")]]
-            [:span {:class "oppai-note"} "あなたのアイデアから、次の一枚へ。"]]
+            [:h1 (case tab :home "ホーム" :posts "投稿" :tools "AIツール"
+                        :models "モデル" :image "画像作成" :douga "動画作成"
+                        :face "自分の顔" :works "ライブラリ" "チャット")]]
            [:div {:class "oppai-main"}
-            (case tab :image [image-studio] :douga [douga-studio]
-                  :face [face-view] :models [models-view] :works [works-view]
-                  [chat-studio])]]
-          [:footer {:class "oppai-footer"}
-           [:p "oppai.fans · Creative studio"]
-           [:p {:class "oppai-note"} "UI inspired by "
-            [:a {:href "https://tensorhub.art/models"} "TensorHub"]
-            " · デジタル庁デザインシステム (MIT)"]]]))))
+            (case tab :home [public-gallery] :posts [public-gallery] :tools [tools-view]
+                  :image [image-studio] :douga [douga-studio] :face [face-view]
+                  :models [models-view] :works [works-view] [chat-studio])]]
+          [:footer {:class "oppai-footer"} [:p "© 2026 oppai.fans"]]]))))
