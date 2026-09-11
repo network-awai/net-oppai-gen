@@ -3,7 +3,7 @@
 ;; deployed Worker, so it can exercise the paths that need it: a real chat
 ;; round-trip against the fleet, and the douga submit + poll loop.
 ;;
-;;   npx nbb scripts/prod-smoke.cljk [https://oppai.fans] [screenshot-dir]
+;;   kbb --backend sci scripts/prod-smoke.cljk [https://oppai.fans] [screenshot-dir]
 ;;
 ;; It costs real fleet inference. Image generation is deliberately NOT
 ;; exercised here — a render is 60-100s of GPU time and a smoke test should

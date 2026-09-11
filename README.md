@@ -120,16 +120,16 @@ mirror・`.cljk-build`・deps.edn の `:paths` を元に戻す。
 
 ```bash
 npm install
-npm run dev          # shadow-cljs watch (http://localhost:8790)
+npm run dev          # amu compile --target wasm32-browser (http://localhost:8790)
 npm test             # nbb（64 tests / 371 assertions、JVM を起こさない）
 npm run e2e          # 実 Chromium。OPPAI_E2E_BASE=http://127.0.0.1:8797 で wrangler dev の Worker 経路も検査
-clojure -M:local:lint   # clj-kondo。ここだけまだ JVM（clj-kondo は nbb で走らない）
+kbb -M:local:lint   # clj-kondo。ここだけまだ JVM（clj-kondo は nbb で走らない）
 npm run build        # release build + index.html 生成（hash 済 bundle 名）
 npm run deploy       # build → wrangler deploy (oppai.fans)
 ```
 
 `npm test` / `npm run generate-site` は nbb で走る（オーナー判断 2026-09-06、
-`clojure -M` を JVM-free な経路へ置換）。classpath は package.json に書いた
+`kbb -M` を JVM-free な経路へ置換）。classpath は package.json に書いた
 相対パスで、monorepo の sibling checkout（`../../kotoba-lang/*`、`text` を
 含む — nbb は deps.edn を読まないので、`kotoba.lang.text` へ移った日から
 2026-09-11 まで `npm test` は main で赤だった）を指す ——

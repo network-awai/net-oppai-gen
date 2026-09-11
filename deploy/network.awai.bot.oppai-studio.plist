@@ -57,7 +57,7 @@
 	<array>
 		<string>/bin/zsh</string>
 		<string>-c</string>
-		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; nbb scripts/cljk_mirror.cljk &amp;&amp; exec nbb --classpath .cljk-build/src:.cljk-build/scripts:../../kotoba-lang/text/src .cljk-build/scripts/oppai_studio_tick.cljs</string>
+		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; kbb --backend sci scripts/cljk_mirror.cljk &amp;&amp; exec kbb --backend sci --classpath .cljk-build/src:.cljk-build/scripts:../../kotoba-lang/text/src .cljk-build/scripts/oppai_studio_tick.cljs</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
