@@ -106,6 +106,32 @@
   (let [live (:image parsed)]
     (if (seq live) live fallback-image-models)))
 
+;; ---- image models from the generation node ------------------------------------
+
+(def ^:private not-image-checkpoints
+  "Checkpoint files that sit in models/checkpoints but are not text-to-image
+  models — the node lists everything CheckpointLoaderSimple would load."
+  #"(?i)ltx|wan|svd|hunyuan|video")
+
+(defn parse-image-models
+  "`GET /api/image-models` (the Worker's proxy of the generation node's
+  `/v1/generation/image-models`) → the same shape `parse-model-map` yields
+  for `:image`, plus `:source` (\"comfyui\" | \"static-fallback\") and
+  `:face-modes`. Video checkpoints the node happens to list are dropped —
+  offering LTX as an image model is a ComfyUI error the visitor cannot read."
+  [m]
+  (let [models (->> (or (:models m) [])
+                    (map (fn [{:keys [id file]}] {:model-id (str id) :label (humanize id)
+                                                  :checkpoint file :nodes [] :queue 0 :exact? true}))
+                    (remove #(re-find not-image-checkpoints (:model-id %)))
+                    (sort-by :model-id)
+                    vec)]
+    {:image models
+     :source (:source m)
+     :default (:default m)
+     :face-modes (vec (or (:faceModes m) (:face-modes m) []))
+     :sizes (:sizes m)}))
+
 (defn default-image-model [parsed]
   (:model-id (first (image-models parsed))))
 

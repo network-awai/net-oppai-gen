@@ -11,6 +11,8 @@
   //
   // Secret, set out of band with `wrangler secret put`, NOT in this file:
   //   MURAKUMO_GENERATION_TOKEN  signed murakumo capability, scope=generation
+  // The Worker owns /api/*: image AND video jobs (token proxy), the node's
+  // image-model list, and the face ceremony (/api/face/*).
   // Optional: OPPAI_CHAT_MODEL=awai-network/basho, OPPAI_VIDEO_MODEL=hokusai
   "name": "oppai-fans",
   "main": "dist/worker.js",
@@ -24,6 +26,15 @@
   "routes": [
     { "pattern": "oppai.fans", "custom_domain": true },
     { "pattern": "www.oppai.fans", "custom_domain": true }
+  ],
+  // Face enrolments + challenge nonces (oppai.gen.guard). KV is the right
+  // plane for this: session-shaped, TTL-expiring, per-browser, and the
+  // record is the person's own frame — nothing durable, nothing shared,
+  // nothing to reconstruct (CLAUDE.md: KV for session/cache only, and an
+  // enrolment IS a session). Created 2026-09-11 with `wrangler kv namespace
+  // create OPPAI_KV`.
+  "kv_namespaces": [
+    { "binding": "OPPAI_KV", "id": "0b84f6a6905644c68f60eb693d15c6b1" }
   ],
   "observability": { "enabled": true }
 }

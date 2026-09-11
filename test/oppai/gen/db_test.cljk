@@ -2,7 +2,9 @@
   (:require [clojure.test :refer [deftest is testing]]
             [oppai.gen.db :as db]
             [oppai.gen.fleet :as fleet]
-            [oppai.gen.fleet-test :as ft]))
+            [oppai.gen.fleet-test :as ft]
+            [oppai.gen.route :as route]
+            [kotoba.lang.text :as str]))
 
 (deftest chat-turn-appends-a-user-turn-and-a-streaming-placeholder
   (let [d (assoc-in (db/initial-db) [:chat :draft] "  hello  ")
@@ -35,13 +37,126 @@
       (is (= (inc before) (get-in d [:chat :stream-token])))
       (is (true? (:stopped? (last (get-in d [:chat :messages]))))))))
 
+(def node-models
+  "A real `GET /v1/generation/image-models` answer from gad (2026-09-11)."
+  {:source "comfyui" :default "animagine-xl-4.0"
+   :models [{:id "Illustrious-XL-v2.0" :file "Illustrious-XL-v2.0.safetensors"}
+            {:id "animagine-xl-4.0" :file "animagine-xl-4.0.safetensors"}
+            {:id "ltx-2.3-22b-distilled-fp8" :file "ltx-2.3-22b-distilled-fp8.safetensors"}
+            {:id "waiREALCN_v150" :file "waiREALCN_v150.safetensors"}
+            {:id "waiREALMIX_v11" :file "waiREALMIX_v11.safetensors"}]
+   :faceModes ["plus-face" "faceid"]
+   :sizes [512 640 768 832 896 1024 1152 1216 1280 1344]})
+
 (deftest fleet-load-picks-a-default-image-model-but-does-not-override-a-choice
-  (let [parsed (fleet/parse-model-map ft/sample-map)]
-    (is (= "animagine-xl-4.0" (get-in (db/fleet-loaded (db/initial-db) parsed)
-                                      [:image :model])))
-    (let [chosen (assoc-in (db/initial-db) [:image :model] "wai-illustrious-sdxl-v150")]
-      (is (= "wai-illustrious-sdxl-v150"
-             (get-in (db/fleet-loaded chosen parsed) [:image :model]))))))
+  (let [parsed (fleet/parse-image-models node-models)
+        d (db/fleet-loaded (db/initial-db) parsed)]
+    (is (= "waiREALMIX_v11" (get-in d [:image :model]))
+        "the catalog's first available explicit card, not the node's alphabetical first")
+    (is (= "comfyui" (get-in d [:fleet :image-source])))
+    (is (= ["plus-face" "faceid"] (get-in d [:fleet :face-modes])))
+    (is (db/face-available? d))
+    (is (not (some #{"ltx-2.3-22b-distilled-fp8"} (map :model-id (get-in d [:fleet :image]))))
+        "a video checkpoint is not an image model")
+    (let [chosen (assoc-in (db/initial-db) [:image :model] "animagine-xl-4.0")]
+      (is (= "animagine-xl-4.0" (get-in (db/fleet-loaded chosen parsed) [:image :model]))))
+    (testing "a face mode the node does not offer is replaced by one it does"
+      (let [d (db/fleet-loaded (assoc-in (db/initial-db) [:image :face-mode] "faceid")
+                               (fleet/parse-image-models (assoc node-models :faceModes ["plus-face"])))]
+        (is (= "plus-face" (get-in d [:image :face-mode])))
+        (is (db/face-available? d))))
+    (is (not (db/face-available? (db/fleet-loaded (db/initial-db)
+                                                  (fleet/parse-image-models (assoc node-models :faceModes []))))))))
+
+(deftest tabs-come-from-the-route-table
+  (is (= route/views db/tabs))
+  (is (= :models (:tab (db/set-tab (db/initial-db) :models))))
+  (is (= route/default-view (:tab (db/set-tab (db/initial-db) :nope)))))
+
+(deftest image-readiness-requires-a-face-when-one-was-asked-for
+  (let [d (-> (db/initial-db)
+              (db/fleet-loaded (fleet/parse-image-models node-models))
+              (assoc-in [:image :prompt] "portrait"))]
+    (is (db/image-ready? d))
+    (let [asked (assoc-in d [:image :face-ref?] true)]
+      (is (not (db/image-ready? asked)) "asked for a face, none enrolled")
+      (let [enrolled (db/face-status asked {:frame "data:image/png;base64,AAAA"
+                                            :expires-at (+ (db/now-ms) 100000)})]
+        (is (db/face-enrolled? enrolled))
+        (is (db/image-ready? enrolled))
+        (is (true? (get-in (first (db/image-job-body enrolled)) [:input :face_ref])))
+        (testing "removing the face also unticks the toggle"
+          (let [gone (db/face-removed enrolled)]
+            (is (false? (get-in gone [:image :face-ref?])))
+            (is (= :none (get-in gone [:face :status])))))))
+    (testing "an expired enrolment is not enrolled"
+      (is (not (db/face-enrolled? (db/face-status d {:frame "x" :expires-at (- (db/now-ms) 1)})))))))
+
+(deftest a-finished-image-job-lands-on-the-shelf
+  (let [d (-> (db/initial-db)
+              (assoc-in [:image :prompt] "portrait")
+              (assoc-in [:image :model] "waiREALMIX_v11")
+              (assoc-in [:image :face-ref?] true)
+              db/begin-image)
+        running (db/image-job d {:jobId "j1" :status "running" :progress 40})
+        done (db/image-job running {:jobId "j1" :status "done" :progress 100
+                                    :artifacts [{:kind "png" :url "https://murakumo.cloud/x"}]})]
+    (is (= :running (get-in running [:image :status])))
+    (is (empty? (:works running)))
+    (is (= :done (get-in done [:image :status])))
+    (is (= "/api/generation/jobs/j1/artifact" (get-in done [:image :job :job/artifact-url])))
+    (let [w (first (:works done))]
+      (is (= {:id "j1" :kind :image :prompt "portrait" :model "waiREALMIX_v11" :face? true
+              :url "/api/generation/jobs/j1/artifact"}
+             (dissoc w :at))))
+    (is (empty? (:works (db/remove-work done "j1"))))
+    (testing "a failed job carries its reason and adds nothing"
+      (let [failed (db/image-job d {:jobId "j2" :status "failed" :error "ComfyUI image job failed"})]
+        (is (= :failed (get-in failed [:image :status])))
+        (is (= "ComfyUI image job failed" (get-in failed [:image :error])))
+        (is (empty? (:works failed)))))))
+
+(deftest the-shelf-is-bounded-and-only-keeps-real-entries
+  (let [d (db/works-loaded (db/initial-db) (concat [{:no-id true} "junk"]
+                                                   (map (fn [i] {:id (str i)}) (range 100))))]
+    (is (= db/works-max (count (:works d))))
+    (is (every? :id (:works d)))
+    (is (= db/works-max (count (db/works-for-storage (update d :works into (map (fn [i] {:id (str "x" i)}) (range 10)))))))))
+
+(deftest presets-and-card-choice
+  (let [d (-> (db/initial-db) (assoc-in [:image :model] "Illustrious-XL-v2.0"))
+        p (db/apply-preset d :nude)]
+    (is (str/includes? (get-in p [:image :prompt]) "adult woman"))
+    (is (str/starts-with? (get-in p [:image :prompt]) "masterpiece"))
+    (is (seq (get-in p [:image :negative])))
+    (is (= d (db/apply-preset d :nope)))
+    (let [c (db/choose-model (assoc d :tab :models) "waiREALCN_v150")]
+      (is (= "waiREALCN_v150" (get-in c [:image :model])))
+      (is (= :image (:tab c))))))
+
+(deftest face-ceremony-state
+  (let [d (db/face-challenge (db/initial-db) {:nonce "n" :gesture "g" :issued-at 1 :ttl-ms 60000})]
+    (is (not (db/face-enrol-ready? d)))
+    (let [one (db/face-captured d "a") two (db/face-captured one "b")]
+      (is (= ["a"] (get-in one [:face :capture])))
+      (is (= ["a" "b"] (get-in two [:face :capture])))
+      (is (= ["c"] (get-in (db/face-captured two "c") [:face :capture])) "a third capture starts over")
+      (is (not (db/face-enrol-ready? two)) "consent is still unticked")
+      (is (db/face-enrol-ready? (db/face-consent two true)))
+      (is (not (db/face-enrol-ready? (db/face-busy (db/face-consent two true))))))))
+
+(deftest a-work-carries-into-the-video-studio-as-a-keyframe
+  (let [w {:id "j1" :kind :image :prompt "portrait" :url "/api/generation/jobs/j1/artifact"}
+        d (db/douga-from-work (db/initial-db) w "data:image/png;base64,AAAA")]
+    (is (= :douga (:tab d)))
+    (is (= "data:image/png;base64,AAAA" (get-in d [:douga :image])))
+    (is (= "j1" (get-in d [:douga :image-from])))
+    (is (= "portrait" (get-in d [:douga :prompt])) "an empty prompt inherits the work's")
+    (is (= "wan2.2-ti2v-5b" (get-in d [:douga :model])) "the i2v-capable model")
+    (is (nil? (get-in (db/douga-clear-image d) [:douga :image])))
+    (let [done (db/douga-job (db/begin-douga d) {:jobId "v1" :status "done" :artifacts [{:url "u"}]})]
+      (is (= :douga (:kind (first (:works done)))))
+      (is (true? (:face? (first (:works done))))))))
 
 (deftest an-unreachable-fleet-still-yields-a-usable-picker
   (let [d (db/fleet-failed (db/initial-db) "boom")]
@@ -52,7 +167,7 @@
 (deftest generation-is-gated-on-having-something-to-generate
   ;; A run costs a real GPU minute, so the button must not be live for an
   ;; empty prompt or while one is already in flight.
-  (let [d (db/fleet-loaded (db/initial-db) (fleet/parse-model-map ft/sample-map))]
+  (let [d (db/fleet-loaded (db/initial-db) (fleet/parse-image-models node-models))]
     (is (false? (db/image-ready? d)))
     (let [d (assoc-in d [:image :prompt] "a garden")]
       (is (true? (db/image-ready? d)))
@@ -62,9 +177,8 @@
   (let [d (-> (db/initial-db)
               (assoc-in [:image :prompt] "x")
               db/begin-image
-              (db/image-done "AAA"))]
+              (db/image-job {:jobId "j" :status "done" :artifacts [{:url "u"}]}))]
     (is (= :done (get-in d [:image :status])))
-    (is (= "AAA" (get-in d [:image :b64])))
     (is (number? (get-in d [:image :elapsed-ms])))))
 
 (deftest a-terminal-job-ends-the-douga-run

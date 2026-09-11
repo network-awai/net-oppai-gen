@@ -19,9 +19,20 @@
   - `/api/chat` — streamed, so no 100 s ceiling, and one place to bound abuse.
   - `/api/generation` + `/api/generation/jobs/:id` — token-gated upstream.
 
-  Privacy: no prompt, completion or artifact is stored or logged here. This
-  Worker is a pipe."
+  - `/api/image-models` — the generation node's own checkpoint list, token-
+    gated upstream like the jobs are.
+  - `/api/face/*` — the consent ceremony (`oppai.gen.guard`). The ONLY way a
+    face reaches the fleet from this site: a server-issued, single-use,
+    60 s challenge; two frames from the browser's camera; explicit consent;
+    the frame held in KV for 7 days under an HttpOnly cookie. A browser
+    never sends `input.face`; it sends `input.face_ref true` and this Worker
+    substitutes the enrolled frame. Refused otherwise.
+
+  Privacy: no prompt, completion or artifact is stored or logged here. The
+  one thing kept is the enrolled face frame, for the person who enrolled it,
+  until they delete it or it expires."
   (:require [kotoba.lang.text :as str]
+            [oppai.gen.guard :as guard]
             [goog.object :as gobj]))
 
 (def ^:private chat-upstream "https://api.murakumo.cloud/v1/chat/completions")
@@ -131,7 +142,7 @@
     (f token)
     (js/Promise.resolve
      (error-response "not_configured"
-                     "動画生成はこのデプロイでは未設定です (MURAKUMO_GENERATION_TOKEN)"
+                     "生成ジョブ API はこのデプロイでは未設定です (MURAKUMO_GENERATION_TOKEN)"
                      503))))
 
 (defn- forward!
@@ -149,17 +160,21 @@
                                                              "cache-control" "no-store"}}))))))
       (.catch (fn [e] (error-response "upstream_error" (str e) 502)))))
 
+(declare submit-image!)
+
 (defn- submit-generation! [request env]
-  (with-token env
-    (fn [token]
-      (-> (.json request)
-          (.then (fn [raw]
-                   (when-let [model (video-model env)]
-                     (gobj/set raw "model" model))
-                   (forward! generation-upstream token
-                             {:method "POST"
-                              :body (js/JSON.stringify raw)})))
-          (.catch (fn [e] (error-response "invalid_request" (str e) 400)))))))
+  (-> (.json request)
+      (.then (fn [raw]
+               (if (= "image" (gobj/get raw "type"))
+                 (submit-image! request raw env)
+                 (with-token env
+                   (fn [token]
+                     (when-let [model (video-model env)]
+                       (gobj/set raw "model" model))
+                     (forward! generation-upstream token
+                               {:method "POST"
+                                :body (js/JSON.stringify raw)}))))))
+      (.catch (fn [e] (error-response "invalid_request" (str e) 400)))))
 
 (defn- job-status! [job-id env]
   (with-token env
@@ -196,6 +211,132 @@
                                    #js {:status (.-status resp) :headers headers}))))
           (.catch (fn [e] (error-response "upstream_error" (str e) 502)))))))
 
+;; ---- kv / cookies -------------------------------------------------------------
+
+(defn- kv [env] (gobj/get env "OPPAI_KV"))
+
+(defn- kv-get-json [env k]
+  (if-let [store (kv env)]
+    (-> (.get store k "json")
+        (.then (fn [v] (when v (js->clj v :keywordize-keys true)))))
+    (js/Promise.resolve nil)))
+
+(defn- kv-put-json! [env k v ttl-s]
+  (.put (kv env) k (js/JSON.stringify (clj->js v)) #js {:expirationTtl ttl-s}))
+
+(defn- kv-delete! [env k] (.delete (kv env) k))
+
+(defn- random-hex [n-bytes]
+  (let [a (js/Uint8Array. n-bytes)]
+    (js/crypto.getRandomValues a)
+    (apply str (map #(.padStart (.toString % 16) 2 "0") (array-seq a)))))
+
+(defn- cookie [request name]
+  (some->> (str/split (str (.get (.-headers request) "cookie")) #";\s*")
+           (map #(str/split % #"=" 2))
+           (some (fn [[k v]] (when (= name (str/trim (str k))) v)))))
+
+(def ^:private face-cookie "oppai_face")
+
+(defn- face-cookie-header [id max-age]
+  (str face-cookie "=" (or id "") "; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=" max-age))
+
+(defn- json-response-with-cookie [body status set-cookie]
+  (js/Response. (js/JSON.stringify (clj->js body))
+                #js {:status status
+                     :headers #js {"content-type" "application/json"
+                                   "cache-control" "no-store"
+                                   "set-cookie" set-cookie}}))
+
+(defn- without-kv []
+  (error-response "not_configured" "顔の登録はこのデプロイでは未設定です (OPPAI_KV)" 503))
+
+;; ---- face ceremony --------------------------------------------------------------
+
+(defn- face-challenge! [env]
+  (if-not (kv env)
+    (js/Promise.resolve (without-kv))
+    (let [nonce (random-hex 16)
+          gesture (rand-nth guard/gestures)
+          now (.now js/Date)]
+      (-> (kv-put-json! env (str "challenge:" nonce)
+                        {:issued-at now :gesture gesture :used? false}
+                        ;; KV expiry is a coarse backstop (min 60 s); the
+                        ;; exact window is guard/challenge-valid?.
+                        120)
+          (.then (fn [_] (json-response {:nonce nonce :gesture gesture
+                                          :issuedAt now :ttlMs guard/challenge-ttl-ms}
+                                         200)))))))
+
+(defn- face-enrol! [request env]
+  (if-not (kv env)
+    (js/Promise.resolve (without-kv))
+    (-> (.json request)
+        (.then (fn [raw]
+                 (let [body (js->clj raw :keywordize-keys true)
+                       nonce (str (:nonce body))]
+                   (-> (kv-get-json env (str "challenge:" nonce))
+                       (.then (fn [challenge]
+                                (let [[record err] (guard/validate-enrolment body challenge (.now js/Date))]
+                                  (if err
+                                    (error-response "invalid_enrolment" err 400)
+                                    (let [id (random-hex 16)]
+                                      (-> (js/Promise.all
+                                           #js [(kv-put-json! env (str "face:" id) record guard/enrolment-ttl-s)
+                                                (kv-delete! env (str "challenge:" nonce))])
+                                          (.then (fn [_]
+                                                   (json-response-with-cookie
+                                                    (assoc (guard/public-face record) :status "enrolled")
+                                                    201
+                                                    (face-cookie-header id guard/enrolment-ttl-s))))))))))))))
+        (.catch (fn [e] (error-response "invalid_request" (str e) 400))))))
+
+(defn- face-record
+  "The enrolment behind this request's cookie, or nil."
+  [request env]
+  (if-let [id (cookie request face-cookie)]
+    (-> (kv-get-json env (str "face:" id))
+        (.then (fn [r] (when (guard/enrolment-active? r (.now js/Date)) r))))
+    (js/Promise.resolve nil)))
+
+(defn- face-status! [request env]
+  (if-not (kv env)
+    (js/Promise.resolve (json-response {:status "unavailable"} 200))
+    (-> (face-record request env)
+        (.then (fn [r]
+                 (if r
+                   (json-response (assoc (guard/public-face r) :status "enrolled") 200)
+                   (json-response {:status "none"} 200)))))))
+
+(defn- face-delete! [request env]
+  (if-not (kv env)
+    (js/Promise.resolve (without-kv))
+    (let [id (cookie request face-cookie)]
+      (-> (if id (kv-delete! env (str "face:" id)) (js/Promise.resolve nil))
+          (.then (fn [_] (json-response-with-cookie {:status "none"} 200
+                                                    (face-cookie-header "" 0))))))))
+
+;; ---- image jobs ---------------------------------------------------------------
+
+(defn- submit-image! [request raw env]
+  ;; The guard runs BEFORE the token check: a refused prompt is refused on
+  ;; every deployment, configured or not, and the reason is the guard's.
+  (-> (face-record request env)
+      (.then (fn [record]
+               (let [[body err] (guard/sanitize-image-job (js->clj raw :keywordize-keys true)
+                                                          (:frame record))]
+                 (if err
+                   (error-response "invalid_request" err 400)
+                   (with-token env
+                     (fn [token]
+                       (forward! generation-upstream token
+                                 {:method "POST" :body (js/JSON.stringify (clj->js body))})))))))))
+
+(defn- image-models! [env]
+  (with-token env
+    (fn [token]
+      (forward! (str generation-upstream "/image-models") token {}))))
+
 ;; ---- health -----------------------------------------------------------------
 
 (defn- health [env]
@@ -203,8 +344,9 @@
    {:ok true
     :service "oppai-fans"
     :chat {:upstream chat-upstream :model (chat-model env)}
-    :image {:direct-from-browser true
-            :upstream "https://api.murakumo.cloud/v1/images/generations"}
+    :image {:direct-from-browser false
+            :upstream generation-upstream
+            :face-ceremony (boolean (kv env))}
     :douga {:configured (boolean (env-str env "MURAKUMO_GENERATION_TOKEN"))
             :model (or (video-model env) "client-selected")
             :upstream generation-upstream}}
@@ -236,6 +378,27 @@
           (if (= "POST" method)
             (submit-generation! request env)
             (error-response "method_not_allowed" "POST only" 405))
+
+          (= "/api/image-models" path)
+          (if (= "GET" method)
+            (image-models! env)
+            (error-response "method_not_allowed" "GET only" 405))
+
+          (= "/api/face/challenge" path)
+          (if (= "POST" method)
+            (face-challenge! env)
+            (error-response "method_not_allowed" "POST only" 405))
+
+          (= "/api/face/enroll" path)
+          (if (= "POST" method)
+            (face-enrol! request env)
+            (error-response "method_not_allowed" "POST only" 405))
+
+          (= "/api/face" path)
+          (case method
+            "GET" (face-status! request env)
+            "DELETE" (face-delete! request env)
+            (error-response "method_not_allowed" "GET or DELETE" 405))
 
           (re-matches job-path path)
           (if (= "GET" method)

@@ -2,13 +2,15 @@
   "Browser-side I/O. The routing decision per surface is deliberate and
   differs, so it is written down here rather than inferred from the code:
 
-  - **Fleet map and image generation go straight to `api.murakumo.cloud`.**
-    Those routes are unauthenticated and send `Access-Control-Allow-Origin:
-    *`, so there is nothing for a proxy to add — and one thing it would take
-    away: an image render is a measured 60–100 s of synchronous GPU work,
-    while Cloudflare cuts a non-streaming Worker subrequest at 100 s and
-    returns an HTML 524. Proxying image generation would convert a slow
-    success into an unfixable timeout. The browser has no such limit.
+  - **Image generation goes through our own `/api/generation` as a JOB.**
+    Until 2026-09-11 it went browser-direct to the synchronous
+    `api.murakumo.cloud/v1/images/generations`, because a render is 60–100 s
+    of GPU work and a Worker subrequest dies at 100 s. The job API has no
+    such ceiling (submit, poll, fetch), it is the same ComfyUI on the same
+    node, and it is the only path that can carry a face reference — which
+    must never be an open, unauthenticated endpoint. So images moved to the
+    job API; the model list moved with them (`/api/image-models` is what
+    THAT node holds, not what another mini reports to /infer/model-map).
 
   - **Chat goes through our own `/api/chat`.** It streams, so the 100 s
     ceiling does not apply, and routing it through the Worker gives the app
@@ -55,8 +57,8 @@
 ;; ---- fleet ------------------------------------------------------------------
 
 (defn fetch-fleet! [{:keys [on-ok on-error]}]
-  (fetch-json! fleet/model-map-url
-               {:on-ok #(on-ok (fleet/parse-model-map %))
+  (fetch-json! "/api/image-models"
+               {:on-ok #(on-ok (fleet/parse-image-models %))
                 :on-error on-error}))
 
 ;; ---- chat -------------------------------------------------------------------
@@ -133,26 +135,107 @@
 
 ;; ---- image ------------------------------------------------------------------
 
-(defn generate-image!
-  [{:keys [prompt model size negative on-ok on-error]}]
-  (fetch-json! fleet/image-url
-               {:method "POST"
-                :body (fleet/image-request {:prompt prompt :model model
-                                            :size size :negative negative})
-                :on-ok (fn [resp]
-                         (if-let [b64 (fleet/image-b64 resp)]
-                           (on-ok b64)
-                           (on-error "生成は成功しましたが画像が返りませんでした")))
-                :on-error on-error}))
+(defn submit-image!
+  "`body` is the job from `oppai.gen.guard/image-job` — already shaped, already
+  minor-checked. The Worker adds the enrolled face when `input.face_ref` is
+  set."
+  [{:keys [body on-ok on-error]}]
+  (fetch-json! "/api/generation" {:method "POST" :body body :on-ok on-ok :on-error on-error}))
+
+(def ^:private image-poll-ms 3000)
+
+(defn poll-image!
+  [{:keys [job-id on-ok on-error]}]
+  (when (seq (str job-id))
+    (js/setTimeout
+     (fn []
+       (fetch-json! (str "/api/generation/jobs/" (js/encodeURIComponent job-id))
+                    {:on-ok on-ok :on-error on-error}))
+     image-poll-ms)))
+
+;; ---- face -------------------------------------------------------------------
+
+(defn face-status! [{:keys [on-ok on-error]}]
+  (fetch-json! "/api/face" {:on-ok on-ok :on-error on-error}))
+
+(defn face-challenge! [{:keys [on-ok on-error]}]
+  (fetch-json! "/api/face/challenge" {:method "POST" :body {} :on-ok on-ok :on-error on-error}))
+
+(defn face-enrol! [{:keys [nonce frames consent on-ok on-error]}]
+  (fetch-json! "/api/face/enroll"
+               {:method "POST" :body {:nonce nonce :frames frames :consent consent}
+                :on-ok on-ok :on-error on-error}))
+
+(defn face-delete! [{:keys [on-ok on-error]}]
+  (fetch-json! "/api/face" {:method "DELETE" :on-ok on-ok :on-error on-error}))
+
+;; ---- camera -----------------------------------------------------------------
+
+(defonce ^:private camera-stream (atom nil))
+
+(defn camera-start!
+  "Front camera into `video-el`. Rejects with a message a person can act on
+  when the browser refuses (no camera, permission denied, insecure context)."
+  [video-el {:keys [on-ok on-error]}]
+  (if-not (and js/navigator.mediaDevices (.-getUserMedia js/navigator.mediaDevices))
+    (on-error "このブラウザではカメラを使えません")
+    (-> (.getUserMedia js/navigator.mediaDevices
+                       #js {:video #js {:facingMode "user" :width 640 :height 640} :audio false})
+        (.then (fn [stream]
+                 (reset! camera-stream stream)
+                 (set! (.-srcObject video-el) stream)
+                 (.play video-el)
+                 (on-ok stream)))
+        (.catch (fn [e] (on-error (str "カメラを開けませんでした: " (.-message e))))))))
+
+(defn camera-stop! []
+  (when-let [s @camera-stream]
+    (doseq [t (array-seq (.getTracks s))] (.stop t))
+    (reset! camera-stream nil)))
+
+(defn capture-frame
+  "One JPEG frame from the live video, as a data URI. 640 px on the long
+  side — enough for an IP-Adapter portrait, small enough for KV."
+  [video-el]
+  (let [vw (.-videoWidth video-el) vh (.-videoHeight video-el)
+        scale (min 1 (/ 640 (max vw vh 1)))
+        w (int (* vw scale)) h (int (* vh scale))
+        canvas (js/document.createElement "canvas")]
+    (set! (.-width canvas) w)
+    (set! (.-height canvas) h)
+    (.drawImage (.getContext canvas "2d") video-el 0 0 w h)
+    (.toDataURL canvas "image/jpeg" 0.9)))
+
+;; ---- works ------------------------------------------------------------------
+
+(defn load-works []
+  (try (some-> (js/localStorage.getItem "oppai-works") js/JSON.parse (js->clj :keywordize-keys true))
+       (catch :default _ nil)))
+
+(defn save-works! [works]
+  (try (js/localStorage.setItem "oppai-works" (js/JSON.stringify (clj->js works)))
+       (catch :default _ nil)))
+
+(defn fetch-data-uri!
+  "Artifact URL → data URI, for carrying a finished image into an i2v job."
+  [url {:keys [on-ok on-error]}]
+  (-> (js/fetch url)
+      (.then (fn [resp] (if (.-ok resp) (.blob resp) (throw (js/Error. (str "HTTP " (.-status resp)))))))
+      (.then (fn [blob]
+               (let [reader (js/FileReader.)]
+                 (set! (.-onload reader) #(on-ok (.-result reader)))
+                 (set! (.-onerror reader) #(on-error "画像を読めませんでした"))
+                 (.readAsDataURL reader blob))))
+      (.catch (fn [e] (on-error (str "画像を取得できませんでした: " e))))))
 
 ;; ---- douga ------------------------------------------------------------------
 
 (defn submit-douga!
-  [{:keys [prompt model size frames on-ok on-error]}]
+  [{:keys [prompt model size frames image on-ok on-error]}]
   (fetch-json! "/api/generation"
                {:method "POST"
                 :body (fleet/video-request {:prompt prompt :model model
-                                            :size size :frames frames})
+                                            :size size :frames frames :image image})
                 :on-ok on-ok
                 :on-error on-error}))
 

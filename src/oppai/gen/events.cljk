@@ -2,6 +2,7 @@
   "re-frame events. Every db transition delegates to `oppai.gen.db` so the
   logic is testable without a browser; the handlers here only wire effects."
   (:require [oppai.gen.db :as db]
+            [oppai.gen.route :as route]
             #?(:cljs [oppai.gen.net :as net])
             #?(:cljs [re-frame.core :as rf])))
 
@@ -13,19 +14,42 @@
       ;; persisted answer lives in localStorage under `db/age-gate-key`; a
       ;; fresh visitor sees the gate, a returning one goes straight in.
       (fn [_ _]
-        (let [confirmed (= js/localStorage.getItem db/age-gate-key "1")]
-          {:db (cond-> (db/initial-db)
+        (let [confirmed (= (js/localStorage.getItem db/age-gate-key) "1")
+              works (or (net/load-works) [])]
+          {:db (cond-> (-> (db/initial-db)
+                           (db/works-loaded works)
+                           (db/set-tab (route/fragment->view js/location.hash)))
                  confirmed (db/confirm-age))
-           :fx (when confirmed [[:fleet/fetch nil]])})))
+           :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil]])})))
 
      (rf/reg-event-fx
       :age/confirm
       (fn [{:keys [db]} _]
         (js/localStorage.setItem db/age-gate-key "1")
         {:db (db/confirm-age db)
-         :fx [[:fleet/fetch nil]]}))
+         :fx [[:fleet/fetch nil] [:face/fetch nil]]}))
 
-     (rf/reg-event-db :ui/tab (fn [db [_ tab]] (assoc db :tab tab)))
+     ;; The nav writes the fragment; the fragment IS the view (one document,
+     ;; addressable screens — ADR-2608080100). `hashchange` feeds back so the
+     ;; back button and a pasted `#models` both land.
+     (rf/reg-event-fx
+      :ui/tab
+      (fn [{:keys [db]} [_ tab]]
+        {:db (db/set-tab db tab)
+         :fx [[:route/fragment (route/view->fragment tab)]]}))
+
+     (rf/reg-fx :route/fragment
+                (fn [fragment]
+                  (when (not= fragment js/location.hash)
+                    (js/history.replaceState nil "" fragment))))
+
+     (rf/reg-event-db :ui/fragment (fn [db [_ hash]] (db/set-tab db (route/fragment->view hash))))
+
+     (rf/reg-fx :works/persist (fn [works] (net/save-works! works)))
+     (rf/reg-event-fx :works/remove
+                      (fn [{:keys [db]} [_ id]]
+                        (let [db' (db/remove-work db id)]
+                          {:db db' :fx [[:works/persist (db/works-for-storage db')]]})))
 
      ;; ---- fleet -------------------------------------------------------------
 
@@ -103,26 +127,118 @@
      ;; ---- image -------------------------------------------------------------
 
      (rf/reg-event-db :image/set (fn [db [_ k v]] (assoc-in db [:image k] v)))
+     (rf/reg-event-db :image/preset (fn [db [_ id]] (db/apply-preset db id)))
+     (rf/reg-event-fx :image/choose-model
+                      (fn [{:keys [db]} [_ id]]
+                        {:db (db/choose-model db id)
+                         :fx [[:route/fragment (route/view->fragment :image)]]}))
 
      (rf/reg-event-fx
       :image/submit
       (fn [{:keys [db]} _]
-        (if-not (db/image-ready? db)
-          {:db db}
-          {:db (db/begin-image db)
-           :fx [[:image/generate (select-keys (:image db)
-                                              [:prompt :model :size :negative])]]})))
+        (let [[body err] (db/image-job-body db)]
+          (cond
+            (not (db/image-ready? db)) {:db db}
+            err {:db (db/image-failed db err)}
+            :else {:db (db/begin-image db)
+                   :fx [[:image/generate body]]}))))
 
      (rf/reg-fx
       :image/generate
-      (fn [params]
-        (net/generate-image!
-         (assoc params
-                :on-ok #(rf/dispatch [:image/done %])
-                :on-error #(rf/dispatch [:image/failed %])))))
+      (fn [body]
+        (net/submit-image!
+         {:body body
+          :on-ok #(rf/dispatch [:image/job %])
+          :on-error #(rf/dispatch [:image/failed %])})))
 
-     (rf/reg-event-db :image/done (fn [db [_ b64]] (db/image-done db b64)))
+     (rf/reg-event-fx
+      :image/job
+      (fn [{:keys [db]} [_ job]]
+        (let [db' (db/image-job db job)
+              status (get-in db' [:image :job :job/status])]
+          (cond-> {:db db'}
+            (contains? #{:queued :running} status)
+            (assoc :fx [[:image/poll (get-in db' [:image :job :job/id])]])
+            (= :done status)
+            (assoc :fx [[:works/persist (db/works-for-storage db')]])))))
+
+     (rf/reg-fx
+      :image/poll
+      (fn [job-id]
+        (net/poll-image! {:job-id job-id
+                          :on-ok #(rf/dispatch [:image/job %])
+                          :on-error #(rf/dispatch [:image/failed %])})))
+
      (rf/reg-event-db :image/failed (fn [db [_ err]] (db/image-failed db (str err))))
+
+     ;; ---- face --------------------------------------------------------------
+
+     (rf/reg-fx :face/fetch
+                (fn [_]
+                  (net/face-status!
+                   {:on-ok #(rf/dispatch [:face/status %])
+                    :on-error #(rf/dispatch [:face/failed %])})))
+
+     (rf/reg-event-db
+      :face/status
+      (fn [db [_ resp]]
+        (db/face-status db (when (= "enrolled" (:status resp))
+                             {:frame (:frame resp) :gesture (:gesture resp)
+                              :enrolled-at (:enrolled-at resp) :expires-at (:expires-at resp)}))))
+
+     (rf/reg-event-fx
+      :face/challenge
+      (fn [{:keys [db]} _]
+        {:db (assoc-in db [:face :error] nil)
+         :fx [[:face/request-challenge nil]]}))
+
+     (rf/reg-fx :face/request-challenge
+                (fn [_]
+                  (net/face-challenge!
+                   {:on-ok #(rf/dispatch [:face/challenged %])
+                    :on-error #(rf/dispatch [:face/failed %])})))
+
+     (rf/reg-event-db
+      :face/challenged
+      (fn [db [_ resp]]
+        (db/face-challenge db {:nonce (:nonce resp) :gesture (:gesture resp)
+                               :issued-at (:issuedAt resp) :ttl-ms (:ttlMs resp)})))
+
+     (rf/reg-event-db :face/captured (fn [db [_ data-uri]] (db/face-captured db data-uri)))
+     (rf/reg-event-db :face/consent (fn [db [_ v]] (db/face-consent db v)))
+     (rf/reg-event-db :face/reset-capture (fn [db _] (assoc-in db [:face :capture] [])))
+
+     (rf/reg-event-fx
+      :face/enrol
+      (fn [{:keys [db]} _]
+        (if-not (db/face-enrol-ready? db)
+          {:db db}
+          {:db (db/face-busy db)
+           :fx [[:face/send-enrolment {:nonce (get-in db [:face :challenge :nonce])
+                                       :frames (get-in db [:face :capture])
+                                       :consent (get-in db [:face :consent])}]]})))
+
+     (rf/reg-fx :face/send-enrolment
+                (fn [params]
+                  (net/face-enrol!
+                   (assoc params
+                          :on-ok #(rf/dispatch [:face/status %])
+                          :on-error #(rf/dispatch [:face/failed %])))))
+
+     (rf/reg-event-fx
+      :face/delete
+      (fn [{:keys [db]} _]
+        {:db (db/face-busy db)
+         :fx [[:face/send-delete nil]]}))
+
+     (rf/reg-fx :face/send-delete
+                (fn [_]
+                  (net/face-delete!
+                   {:on-ok (fn [_] (rf/dispatch [:face/removed]))
+                    :on-error #(rf/dispatch [:face/failed %])})))
+
+     (rf/reg-event-db :face/removed (fn [db _] (db/face-removed db)))
+     (rf/reg-event-db :face/failed (fn [db [_ err]] (db/face-failed db err)))
 
      ;; ---- douga -------------------------------------------------------------
 
@@ -135,7 +251,27 @@
           {:db db}
           {:db (db/begin-douga db)
            :fx [[:douga/generate (select-keys (:douga db)
-                                              [:prompt :model :size :frames])]]})))
+                                              [:prompt :model :size :frames :image])]]})))
+
+     (rf/reg-event-fx
+      :douga/from-work
+      (fn [{:keys [db]} [_ work]]
+        {:db db
+         :fx [[:douga/load-keyframe work]]}))
+
+     (rf/reg-fx :douga/load-keyframe
+                (fn [work]
+                  (net/fetch-data-uri! (:url work)
+                                       {:on-ok #(rf/dispatch [:douga/keyframe work %])
+                                        :on-error #(rf/dispatch [:douga/failed %])})))
+
+     (rf/reg-event-fx
+      :douga/keyframe
+      (fn [{:keys [db]} [_ work data-uri]]
+        {:db (db/douga-from-work db work data-uri)
+         :fx [[:route/fragment (route/view->fragment :douga)]]}))
+
+     (rf/reg-event-db :douga/clear-image (fn [db _] (db/douga-clear-image db)))
 
      (rf/reg-fx
       :douga/generate
@@ -155,7 +291,9 @@
             ;; run is 2+ minutes of real GPU time, so this is a slow poll, not
             ;; a spin.
             (contains? #{:queued :running} status)
-            (assoc :fx [[:douga/poll (get-in db' [:douga :job :job/id])]])))))
+            (assoc :fx [[:douga/poll (get-in db' [:douga :job :job/id])]])
+            (= :done status)
+            (assoc :fx [[:works/persist (db/works-for-storage db')]])))))
 
      (rf/reg-fx
       :douga/poll

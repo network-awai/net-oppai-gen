@@ -2,12 +2,15 @@
   "Portable app state: shape, defaults, and the pure transitions. Everything
   here runs identically on the JVM, which is what the tests drive."
   (:require [kotoba.lang.text :as str]
-            [oppai.gen.fleet :as fleet]))
+            [oppai.gen.catalog :as catalog]
+            [oppai.gen.fleet :as fleet]
+            [oppai.gen.guard :as guard]
+            [oppai.gen.route :as route]))
 
 (def tabs
-  [{:id :chat  :label "チャット" :icon "◇"}
-   {:id :image :label "画像"     :icon "▣"}
-   {:id :douga :label "動画"     :icon "▶"}])
+  "The nav. Generated from the route table so a view cannot exist without an
+  address (ADR-2608080100)."
+  route/views)
 
 (def welcome
   (str "oppai.fans へようこそ。\n\n"
@@ -36,41 +39,66 @@
 
 (defn initial-db []
   {:age-confirmed? false
-   :tab :chat
-   :fleet {:status :loading :image [] :video fleet/video-models :text nil}
+   :tab route/default-view
+   :fleet {:status :loading :image [] :video fleet/video-models :text nil
+           :image-source nil :face-modes []}
+   ;; The browser's enrolled face, mirrored from GET /api/face. `:status`
+   ;; :unknown until asked; :none / :enrolled after. The frame is the
+   ;; person's own — shown back to them, never to anyone else.
+   :face {:status :unknown :record nil :challenge nil :capture [] :consent false
+          :busy? false :error nil}
+   ;; This browser's finished jobs. localStorage-mirrored, per device — a
+   ;; personal shelf, NOT a gallery (the gallery is a phase-2 kotobase plane).
+   :works []
    :chat {:messages [{:id (new-id "m") :role :assistant :content welcome}]
           :draft ""
           :streaming? false
           :streaming-id nil
           :stream-token 0
           :error nil}
-   :image {:prompt "" :model nil :size "1024x1024" :negative ""
-           :status :idle :b64 nil :started-at nil :elapsed-ms nil :error nil}
+   :image {:prompt "" :model nil :size "832x1216" :negative "" :steps 26
+           :face-ref? false :face-mode "plus-face" :face-weight guard/face-weight-default
+           :status :idle :job nil :started-at nil :elapsed-ms nil :error nil}
    :douga {:prompt "" :model (fleet/default-video-model) :size "768x448"
-           :frames 49 :status :idle :job nil :error nil}})
+           :frames 49 :image nil :image-from nil :status :idle :job nil :error nil}})
 
 ;; ---- fleet ------------------------------------------------------------------
 
 (defn fleet-loaded
-  "Fold a parsed model map into the db and pick a default image model if the
-  user has not chosen one. The video list is NOT taken from the map — douga
-  runs on the generation job API, which keeps its own allowlist."
+  "Fold the generation node's image-model list (`GET /api/image-models`,
+  see `fleet/parse-image-models`) into the db and pick a default image model
+  if the user has not chosen one. Image AND video now both come from the
+  generation job API on the same node — the fleet-wide /infer/model-map
+  reported other minis' disks and offered a checkpoint this node did not
+  hold (a 502 the visitor could not have predicted)."
   [db parsed]
-  (let [image (fleet/image-models parsed)]
+  (let [image (fleet/image-models parsed)
+        live (map :model-id image)]
     (-> db
         (assoc :fleet {:status :ready
                        :image image
+                       :image-source (:source parsed)
+                       :face-modes (vec (:face-modes parsed))
                        :video fleet/video-models
-                       :text (:text parsed)
-                       :ts (:ts parsed)})
-        (update-in [:image :model] #(or % (:model-id (first image)))))))
+                       :text nil
+                       :ts (now-ms)})
+        (update-in [:image :model] #(or % (catalog/default-model live)))
+        (update-in [:image :face-mode]
+                   (fn [m] (if (some #{m} (:face-modes parsed)) m
+                               (or (first (:face-modes parsed)) "plus-face")))))))
 
 (defn fleet-failed [db err]
   (let [image fleet/fallback-image-models]
     (-> db
-        (assoc :fleet {:status :fallback :image image
-                       :video fleet/video-models :error (str err)})
+        (assoc :fleet {:status :fallback :image image :image-source :fallback
+                       :face-modes [] :video fleet/video-models :error (str err)})
         (update-in [:image :model] #(or % (:model-id (first image)))))))
+
+(defn face-available?
+  "The node advertises at least one face mode. Without it the toggle is not
+  offered — a control that always fails is worse than none."
+  [db]
+  (boolean (seq (get-in db [:fleet :face-modes]))))
 
 ;; ---- chat -------------------------------------------------------------------
 
@@ -129,34 +157,128 @@
 
 ;; ---- image ------------------------------------------------------------------
 
+(defn face-enrolled? [db]
+  (and (= :enrolled (get-in db [:face :status]))
+       (guard/enrolment-active? (get-in db [:face :record]) (now-ms))))
+
 (defn image-ready?
   "A generation run costs a real GPU minute on a real machine, so the button
-  is only live when there is something to generate and nothing in flight."
+  is only live when there is something to generate, nothing in flight, and —
+  if the person asked for their face — a face to use."
   [db]
   (boolean
    (and (not= :running (get-in db [:image :status]))
         (seq (str/trim (str (get-in db [:image :prompt]))))
-        (seq (str (get-in db [:image :model]))))))
+        (seq (str (get-in db [:image :model])))
+        (or (not (get-in db [:image :face-ref?]))
+            (face-enrolled? db)))))
+
+(defn image-job-body
+  "The job the studio would submit right now, or the reason it cannot."
+  [db]
+  (guard/image-job (select-keys (:image db)
+                                [:prompt :model :size :negative :steps
+                                 :face-ref? :face-mode :face-weight])))
 
 (defn begin-image [db]
   (-> db
       (assoc-in [:image :status] :running)
       (assoc-in [:image :error] nil)
-      (assoc-in [:image :b64] nil)
+      (assoc-in [:image :job] nil)
       (assoc-in [:image :elapsed-ms] nil)
       (assoc-in [:image :started-at] (now-ms))))
 
-(defn image-done [db b64]
-  (let [started (get-in db [:image :started-at])]
-    (-> db
-        (assoc-in [:image :status] :done)
-        (assoc-in [:image :b64] b64)
-        (assoc-in [:image :elapsed-ms] (when started (- (now-ms) started))))))
+(defn image-job
+  "Fold a job envelope from the generation API. Terminal states settle the
+  studio; a finished job also lands on the works shelf."
+  [db job]
+  (let [job (fleet/job-status job)
+        started (get-in db [:image :started-at])
+        db (assoc-in db [:image :job] job)]
+    (if-not (fleet/terminal? job)
+      db
+      (let [done? (= :done (:job/status job))]
+        (cond-> (assoc-in db [:image :status] (if done? :done :failed))
+          done? (assoc-in [:image :elapsed-ms] (when started (- (now-ms) started)))
+          (not done?) (assoc-in [:image :error] (or (:job/error job) "生成に失敗しました"))
+          done? (update :works conj {:id (:job/id job)
+                                     :kind :image
+                                     :prompt (get-in db [:image :prompt])
+                                     :model (get-in db [:image :model])
+                                     :face? (boolean (get-in db [:image :face-ref?]))
+                                     :at (now-ms)
+                                     :url (:job/artifact-url job)}))))))
 
 (defn image-failed [db message]
   (-> db
       (assoc-in [:image :status] :failed)
       (assoc-in [:image :error] message)))
+
+(defn apply-preset
+  "Catalog preset → prompt/negative for the current model."
+  [db preset-id]
+  (let [card (or (catalog/card-by-id (get-in db [:image :model])) (first catalog/cards))
+        preset (some #(when (= preset-id (:id %)) %) catalog/presets)]
+    (if-not preset
+      db
+      (-> db
+          (assoc-in [:image :prompt] (catalog/compose-prompt card preset))
+          (assoc-in [:image :negative] (:negative card))))))
+
+(defn choose-model
+  "Picking a card: set the model, keep the prompt, move to the studio."
+  [db model-id]
+  (-> db
+      (assoc-in [:image :model] (str model-id))
+      (assoc :tab :image)))
+
+;; ---- face -------------------------------------------------------------------
+
+(defn face-status [db record]
+  (assoc db :face (merge (:face db)
+                         {:status (if (guard/enrolment-active? record (now-ms)) :enrolled :none)
+                          :record record :busy? false :error nil :challenge nil :capture []})))
+
+(defn face-challenge [db challenge]
+  (update db :face merge {:challenge challenge :capture [] :error nil}))
+
+(defn face-captured
+  "Two frames, in order: neutral then gesture. A third capture starts over."
+  [db data-uri]
+  (update-in db [:face :capture] (fn [c] (if (>= (count c) 2) [data-uri] (conj (vec c) data-uri)))))
+
+(defn face-consent [db v] (assoc-in db [:face :consent] (boolean v)))
+
+(defn face-enrol-ready? [db]
+  (let [{:keys [challenge capture consent busy?]} (:face db)]
+    (boolean (and challenge (= 2 (count capture)) consent (not busy?)))))
+
+(defn face-busy [db] (assoc-in db [:face :busy?] true))
+(defn face-failed [db message] (update db :face merge {:busy? false :error (str message)}))
+
+(defn face-removed [db]
+  (-> db
+      (face-status nil)
+      (assoc-in [:image :face-ref?] false)))
+
+;; ---- works ------------------------------------------------------------------
+
+(def works-key "oppai-works")
+(def works-max 60)
+
+(defn works-loaded [db works]
+  (assoc db :works (vec (take works-max (filter #(and (map? %) (:id %)) works)))))
+
+(defn works-for-storage [db]
+  (vec (take-last works-max (:works db))))
+
+(defn remove-work [db id]
+  (update db :works (fn [ws] (vec (remove #(= id (:id %)) ws)))))
+
+;; ---- route ------------------------------------------------------------------
+
+(defn set-tab [db tab]
+  (assoc db :tab (if (route/view? tab) tab route/default-view)))
 
 ;; ---- douga ------------------------------------------------------------------
 
@@ -172,13 +294,36 @@
       (assoc-in [:douga :job] nil)))
 
 (defn douga-job [db job]
-  (let [job (fleet/job-status job)]
+  (let [job (fleet/job-status job)
+        done? (and (fleet/terminal? job) (= :done (:job/status job)))]
     (cond-> (assoc-in db [:douga :job] job)
       (fleet/terminal? job)
-      (assoc-in [:douga :status] (if (= :done (:job/status job)) :done :failed))
+      (assoc-in [:douga :status] (if done? :done :failed))
 
       (and (fleet/terminal? job) (:job/error job))
-      (assoc-in [:douga :error] (:job/error job)))))
+      (assoc-in [:douga :error] (:job/error job))
+
+      done?
+      (update :works conj {:id (:job/id job) :kind :douga
+                           :prompt (get-in db [:douga :prompt])
+                           :model (get-in db [:douga :model])
+                           :face? (boolean (get-in db [:douga :image-from]))
+                           :at (now-ms) :url (:job/artifact-url job)}))))
+
+(defn douga-from-work
+  "「この画像から動画」: carry a finished image into the video studio as the
+  i2v keyframe. `data-uri` is fetched by the caller from the work's artifact
+  URL; `work` is remembered so the resulting clip is tagged like its source."
+  [db work data-uri]
+  (-> db
+      (assoc-in [:douga :image] data-uri)
+      (assoc-in [:douga :image-from] (:id work))
+      (update-in [:douga :prompt] (fn [p] (if (str/blank? (str p)) (str (:prompt work)) p)))
+      (assoc-in [:douga :model] "wan2.2-ti2v-5b")
+      (assoc :tab :douga)))
+
+(defn douga-clear-image [db]
+  (-> db (assoc-in [:douga :image] nil) (assoc-in [:douga :image-from] nil)))
 
 (defn douga-failed [db message]
   (-> db
