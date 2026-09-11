@@ -247,7 +247,57 @@
 ;; ---- douga ------------------------------------------------------------------
 
 #?(:cljs
-   (defn douga-studio []
+   (defn free-video-studio []
+     (let [prompt (r/atom "") consent (r/atom false) job (r/atom nil) error (r/atom nil)
+           busy? (r/atom false) request-id (r/atom nil) timer (atom nil)
+           poll! (atom nil) alive? (atom true)]
+       (reset! poll!
+               (fn [id]
+                 (when @alive?
+                   (net/poll-free-video! id
+                     {:on-ok (fn [result]
+                               (when @alive?
+                                 (reset! job result)
+                                 (if (contains? #{"done" "failed"} (:status result))
+                                   (do (reset! busy? false) (reset! request-id nil))
+                                   (reset! timer (js/setTimeout #(@poll! id) 5000)))))
+                      :on-error (fn [message] (when @alive? (reset! busy? false) (reset! error message)))}))))
+       (r/create-class
+        {:component-will-unmount (fn [_] (reset! alive? false) (when @timer (js/clearTimeout @timer)))
+         :reagent-render
+         (fn []
+           [:section {:class "oppai-form"}
+            [:h2 "10eros-max · 無料動画"]
+            [:p "寄付ノードで短い動画を生成します。512×512・39フレーム・1ネットワークにつき1日1回。混雑や処理失敗でも料金は発生しません。"]
+            [:p {:class "oppai-note"} "数分以上かかる場合があります。この画面で完了をお待ちください。動画リンクは24時間有効です。"]
+            (ui/field {:label "動画の内容" :for "free-video-prompt"}
+                      (ui/text-area {:id "free-video-prompt" :class "oppai-full" :rows 3 :max-length 2000 :value @prompt :disabled @busy?
+                                     :on-change #(do (reset! request-id nil) (reset! prompt (.. % -target -value)))}))
+            [:label [:input {:type "checkbox" :checked @consent :disabled @busy? :on-change #(reset! consent (.. % -target -checked))}]
+             " 生成結果の公開前レビューに同意します。"]
+            (ui/button (if @busy? "生成中…" "無料で動画を生成")
+                       {:variant :primary :disabled (or @busy? (not @consent) (str/blank? @prompt))}
+                       (fn [_]
+                         (reset! error nil) (reset! busy? true)
+                         (when-not @request-id (reset! request-id (.randomUUID js/crypto)))
+                         (net/submit-free-video!
+                          {:body {:model "10eros-max" :prompt @prompt :request_id @request-id :publication_consent "public-examples-v1"}
+                           :on-ok (fn [result] (when @alive? (reset! job result) (@poll! (:jobId result))))
+                           :on-error (fn [message] (when @alive? (reset! busy? false) (reset! error message)))})))
+            [:details [:summary "10eros-max の生成例を見る"]
+             [:video {:controls true :plays-inline true :preload "none" :style {:width "100%"}
+                      :poster "/img/producer-10eros-max-20260911.png" :src "/img/producer-10eros-max-20260911.mp4"}]
+             [:p {:class "oppai-note"} "実際の寄付ノードで生成したサンプル · 512×512 · 39フレーム"]]
+            (when (= "failed" (:status @job)) (error-banner "動画を完了できませんでした。料金は発生しません。"))
+            (when @error (error-banner @error))
+            (when @busy? [:p {:role "status"} "寄付ノードで受付・生成しています…"])
+            (when (= "done" (:status @job))
+              [:div [:video {:controls true :plays-inline true :style {:width "100%"}
+                            :src (str "/api/free/video/jobs/" (:jobId @job) "/artifact")}]
+               [:a {:href (str "/api/free/video/jobs/" (:jobId @job) "/artifact") :download "10eros-max.mp4"} "動画を保存"]])])}))))
+
+#?(:cljs
+   (defn paid-douga-studio []
      (let [{:keys [prompt model size frames status job error]} @(rf/subscribe [:douga])
            models @(rf/subscribe [:fleet-video-models])
            busy? (= :running status)
@@ -324,6 +374,12 @@
          (if (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} id) "無料プレビュー" (case available? true "● 搭載済み" false "未搭載" "搭載状況未確認"))]
         (ui/button "生成する →" {:variant :primary :size "sm" :disabled (not (true? available?))}
                    #(rf/dispatch [:image/choose-model id]))]]]))
+
+#?(:cljs
+   (defn douga-studio []
+     [:div {:class "oppai-studio"}
+      [free-video-studio]
+      [:details [:summary "その他の動画モデル"] [paid-douga-studio]]]))
 
 #?(:cljs
    (defn models-view []

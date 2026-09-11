@@ -69,7 +69,7 @@
     response
     (let [id (.randomUUID js/crypto) status (.-status response)
           path (.-pathname (js/URL. (.-url request)))
-          route (if (contains? #{"/api/free/image" "/api/chat" "/api/generation" "/api/feedback" "/api/image-models"} path) path "/api/other")]
+          route (if (str/starts-with? path "/api/free/video") "/api/free/video" (if (contains? #{"/api/free/image" "/api/chat" "/api/generation" "/api/feedback" "/api/image-models"} path) path "/api/other"))]
       (-> (.json (.clone response))
           (.catch (fn [_] #js {}))
           (.then (fn [body]

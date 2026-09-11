@@ -377,6 +377,23 @@
                                                               :publication_consent consent})}))))))))
       (.catch (fn [_] (error-response "free_unavailable" "無料生成を完了できませんでした。料金は発生しません。" 503)))))
 
+(defn- free-video! [request env path]
+  (let [suffix (subs path (count "/api/free/video"))]
+    (if-not (and (or (= "" suffix) (re-matches #"/jobs/[a-f0-9-]{36}(/artifact)?" suffix))
+                 (or (and (= "POST" (.-method request)) (= "" suffix)) (= "GET" (.-method request))))
+      (js/Promise.resolve (error-response "invalid_request" "動画リクエストを確認してください。" 400))
+      (-> (feedback/network-id! request env)
+          (.then (fn [network]
+                   (-> (if (= "POST" (.-method request)) (feedback/bounded-json! request) (js/Promise.resolve nil))
+                       (.then (fn [body]
+                                (js/fetch (str "https://murakumo.cloud/api/v1/preview/video" suffix)
+                                          (clj->js (cond-> {:method (.-method request)
+                                                            :headers {"content-type" "application/json"
+                                                                      "x-preview-sponsor" (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN")
+                                                                      "x-preview-network" network}}
+                                                     body (assoc :body (js/JSON.stringify body))))))))))
+          (.catch (fn [_] (error-response "free_unavailable" "無料動画に接続できませんでした。料金は発生しません。" 503)))))))
+
 (defn- payment-options! []
   (-> (js/fetch billing/offer-url
                 #js {:headers #js {"accept" "application/json"}
@@ -409,6 +426,9 @@
           (= "/api/feedback" path)
           (if (= "POST" method) (feedback/submit! request env)
               (error-response "method_not_allowed" "POST only" 405))
+
+          (or (= "/api/free/video" path) (str/starts-with? path "/api/free/video/"))
+          (free-video! request env path)
 
           (= "/api/free/image" path)
           (if (= "POST" method) (free-image! request env)
