@@ -66,7 +66,7 @@
 
 「作品」（`#works`）は**この端末の localStorage** にある棚で、公開ギャラリーでは
 ない。公開・共有・アカウント（SIWE + Passkey）・クレジット（x402/USDC）は
-次の段（superproject ADR-2609111000 の gap 表）。
+次の段（superproject ADR-2609111130 の gap 表）。
 
 ## 開発
 
