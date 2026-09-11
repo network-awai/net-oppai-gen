@@ -78,6 +78,7 @@
                               :negative_prompt "lowres" :license "cc0" :extra "dropped"}}
                     png-uri)]
     (is (nil? err))
+    (is (= "m" (:model body)) "top-level model, which the billing layer reads")
     (is (= png-uri (get-in body [:input :face])))
     (is (not (contains? (:input body) :face_ref)) "face_ref is ours, not the fleet's")
     (is (= (str "lowres, " guard/minor-negative) (get-in body [:params :negative_prompt])))

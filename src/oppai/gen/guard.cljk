@@ -125,6 +125,11 @@
       (and (:face_ref input) (str/blank? (str face-data-uri))) [nil "no enrolled face for this browser"]
       :else
       [{:type "image"
+        ;; Top-level too: generation.murakumo.cloud's billing layer reads
+        ;; `model` there and refuses a job that names it only in params
+        ;; (measured live 2026-09-11: "generation requests must state
+        ;; :modality and :model to be billed" with model null).
+        :model (str (:model params))
         :input (cond-> {:prompt (str (:prompt input))}
                  (:face_ref input) (assoc :face face-data-uri))
         :params (-> (select-keys params [:model :width :height :steps :seed :face_mode :face_weight])
