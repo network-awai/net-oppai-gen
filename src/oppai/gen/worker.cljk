@@ -353,6 +353,22 @@
             :upstream generation-upstream}}
    200))
 
+(defn- free-image! [request]
+  (-> (.json request)
+      (.then (fn [raw]
+               (let [prompt (gobj/get raw "prompt") consent (gobj/get raw "publication_consent")]
+                 (if-not (and (string? prompt) (<= 1 (count (str/trim prompt)) 2000)
+                              (= "public-examples-v1" consent))
+                   (error-response "invalid_request" "公開前レビューへの同意と2000文字以内のプロンプトが必要です。" 400)
+                   ;; No generation token and no billing identity on the free lane.
+                   ;; The upstream retains its network/day quota and concurrency gate.
+                   (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
+                             #js {:method "POST" :headers #js {"content-type" "application/json"}
+                                  :signal (js/AbortSignal.timeout 120000)
+                                  :body (js/JSON.stringify #js {:model "hokusai-preview" :prompt prompt
+                                                              :publication_consent consent})})))))
+      (.catch (fn [_] (error-response "free_unavailable" "無料生成を完了できませんでした。料金は発生しません。" 503)))))
+
 (defn- payment-options! []
   (-> (js/fetch billing/offer-url
                 #js {:headers #js {"accept" "application/json"}
@@ -382,6 +398,10 @@
       (if-not (same-origin? request)
         (error-response "forbidden_origin" "this endpoint serves oppai.fans only" 403)
         (cond
+          (= "/api/free/image" path)
+          (if (= "POST" method) (free-image! request)
+              (error-response "method_not_allowed" "POST only" 405))
+
           (= "/api/payments" path)
           (if (= "GET" method)
             (payment-options!)

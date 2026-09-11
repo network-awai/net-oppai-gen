@@ -152,9 +152,23 @@
         (let [[body err] (db/image-job-body db)]
           (cond
             (not (db/image-ready? db)) {:db db}
+            (get-in db [:image :free?])
+            {:db (db/begin-image db)
+             :fx [[:image/free {:prompt (get-in db [:image :prompt])
+                                :publication_consent "public-examples-v1"}]]}
             err {:db (db/image-failed db err)}
             :else {:db (db/begin-image db)
                    :fx [[:image/generate body]]}))))
+
+     (rf/reg-fx :image/free
+                (fn [body]
+                  (net/submit-free-image!
+                   {:body body :on-ok #(rf/dispatch [:image/free-result %])
+                    :on-error #(rf/dispatch [:image/failed %])})))
+     (rf/reg-event-fx :image/free-result
+                      (fn [{:keys [db]} [_ result]]
+                        (let [next-db (db/free-image-result db result)]
+                          {:db next-db :fx [[:works/persist (db/works-for-storage next-db)]]})))
 
      (rf/reg-fx
       :image/generate

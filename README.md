@@ -148,3 +148,26 @@ Before enabling image top-ups, establish the account mapping and authenticated
 balance lookup, then verify webhook fulfillment and payment-event deduplication
 against the same ledger used by generation. Do not credit on a redirect or
 expose the shared generation token in the browser.
+
+## Default free generation (2026-09-11)
+
+`#image` now defaults to the owned-fleet anonymous Animagine XL 4.0 Preview.
+No account, payment, or operator generation token is required. The local
+`POST /api/free/image` validates explicit `public-examples-v1` consent and a
+1–2000-character prompt, then forwards to the public Murakumo Preview API.
+The upstream retains quotas and concurrency admission: currently 768×768,
+5 attempts per network/UTC day and a shared capacity cap. Busy/limit failures
+never fall back to a paid request. Free mode does not accept face references,
+model overrides, negative-prompt or size settings; those remain in the
+explicit credit-backed mode.
+
+The donated commons document at `api.murakumo.cloud/v1/commons` describes the
+reserved **text inference** floor. Images use the separately bounded owned
+Preview lane; no reserved image-slot guarantee is claimed.
+
+Live anonymous image generation returned price 0 in 84.577 seconds, artifact
+`2b12b571-12dc-4770-bd08-ddd25716d539`. The PNG was hash-checked and visually
+reviewed (garden, no people/private data) before inclusion as our curated
+`public/img/free-garden.png` sample. Upstream review status remains pending;
+this site's independent publication does not change Murakumo's moderation.
+Prompts and private user-library entries are not added to the public gallery.

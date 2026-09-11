@@ -162,11 +162,17 @@
            models @(rf/subscribe [:fleet-image-models])
            ready? @(rf/subscribe [:image-ready?])
            busy? (= :running status)
-           card (catalog/card-by-id model)
+           free? (:free? image)
+           card (catalog/card-by-id (if free? "animagine-xl-4.0" model))
            set-str (fn [k] (fn [e] (rf/dispatch [:image/set k (.. e -target -value)])))]
        [:section {:class "oppai-studio oppai-image" :aria-label "画像生成"}
         [:div {:class "oppai-form"}
-         (preset-row)
+         [:div {:class "oppai-note"}
+          [:strong "基本の画像生成は無料"]
+          [:p "Animagine XL 4.0 · 768×768 · 同じネットワークから1日5回。混雑時は時間をおいてお試しください。"]]
+         (dds-checkbox "image-free" "無料で生成する" free? busy?
+                       #(rf/dispatch [:image/set :free? (.. % -target -checked)]))
+         (when-not free? (preset-row))
          (ui/field {:label "プロンプト" :for "image-prompt"
                     :support (if (= :tags (:prompt-style card))
                                "このモデルは Danbooru 風のタグ列（1girl, adult, …）で書きます。"
@@ -176,6 +182,7 @@
                                   :disabled busy?
                                   :class "oppai-full"
                                   :on-change (set-str :prompt)}))
+         (when-not free? [:div
          [:div {:class "oppai-form-row"}
           (ui/field {:label "モデル" :for "image-model"
                      :support (or (:tagline card) "生成ノードに実際に載っているチェックポイントです。")}
@@ -195,9 +202,13 @@
                    (ui/text-input {:id "image-negative" :value negative :disabled busy?
                                    :class "oppai-full"
                                    :on-change (set-str :negative)}))
-         (face-toggle image busy?)
+         (face-toggle image busy?)])
+         (when free?
+           (dds-checkbox "image-publication" "生成画像を公開事例の審査対象にすることに同意します（入力文は公開しません）"
+                         (:publication-consent? image) busy?
+                         #(rf/dispatch [:image/set :publication-consent? (.. % -target -checked)])))
          [:div {:class "oppai-actions"}
-          (ui/button (if busy? "生成中…" "画像を生成")
+          (ui/button (if busy? "生成中…" (if free? "無料で画像を生成" "クレジットで画像を生成"))
                      (cond-> {:variant :primary}
                        (not ready?) (assoc :disabled true))
                      #(rf/dispatch [:image/submit]))
@@ -217,9 +228,9 @@
           [:figure {:class "oppai-result"}
            [:img {:src url :alt (str "生成された画像: " prompt)}]
            [:figcaption {:class "oppai-note"}
-            (str (or (:name card) model)
+            (str (if free? "animagine-xl-4.0 · 無料" (or (:name card) model))
                  (when elapsed-ms (str " · " (int (/ elapsed-ms 1000)) " 秒"))
-                 (when (:face-ref? image) " · 自分の顔"))
+                 (when (and (not free?) (:face-ref? image)) " · 自分の顔"))
             " · "
             [:a {:href url :download "oppai-image.png"} "PNG を保存"]
             " · "
@@ -489,17 +500,17 @@
 #?(:cljs
    (defn public-gallery []
      [:section {:class "oppai-studio oppai-public-gallery" :aria-label "公開作品"}
-      [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルとプロンプトを確認できます。"]
+      [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルを確認できます。"]
       (if (seq catalog/public-works)
         [:div {:class "oppai-public-grid"}
-         (for [{:keys [id title image model prompt]} catalog/public-works]
+         (for [{:keys [id title image model prompt width height]} catalog/public-works]
            ^{:key id}
            [:article {:class "oppai-public-card"}
             [:a {:href image :target "_blank" :rel "noopener"}
-             [:img {:src image :alt title :loading "lazy" :width 832 :height 1216}]]
+             [:img {:src image :alt title :loading "lazy" :width (or width 832) :height (or height 1216)}]]
             [:div {:class "oppai-card-body"}
              [:h2 title] [:p {:class "oppai-note"} model]
-             [:details [:summary "プロンプトを見る"] [:p prompt]]
+             (when prompt [:details [:summary "プロンプトを見る"] [:p prompt]])
              (ui/button "このモデルを使う" {:size "sm" :variant :primary}
                         #(rf/dispatch [:image/choose-model model]))]])]
         [:div {:class "oppai-empty"}
@@ -545,8 +556,9 @@
          (ui/button "決済条件を再確認" {:on-click #(rf/dispatch [:payments/refresh])})]
         [:section {:class "oppai-payment-card"}
          [:span {:class "oppai-eyebrow"} "IMAGE CREDITS"]
-         [:h2 "画像・動画の生成残高"]
-         [:p "残高補充は現在準備中です。x402 の文章生成を購入しても、このサイトの画像・動画生成残高は増えません。"]
+         [:h2 "基本の画像生成は無料"]
+         (ui/button "無料で画像を生成" {:variant :primary :href "#image"})
+         [:p "Animagine XL 4.0 は残高補充なしで利用できます。x402 の文章生成を購入しても、このサイトの画像・動画生成残高は増えません。"]
          [:p {:class "oppai-muted"} "補充と生成アカウントの連携が整い次第、ここから購入できるようになります。"]]])))
 
 #?(:cljs

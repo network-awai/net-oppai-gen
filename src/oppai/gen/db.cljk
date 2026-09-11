@@ -56,7 +56,7 @@
           :streaming-id nil
           :stream-token 0
           :error nil}
-   :image {:prompt "" :model nil :size "832x1216" :negative "" :steps 26
+   :image {:free? true :publication-consent? false :prompt "" :model nil :size "832x1216" :negative "" :steps 26
            :face-ref? false :face-mode "plus-face" :face-weight guard/face-weight-default
            :status :idle :job nil :started-at nil :elapsed-ms nil :error nil}
    :douga {:prompt "" :model (fleet/default-video-model) :size "768x448"
@@ -170,8 +170,11 @@
   (boolean
    (and (not= :running (get-in db [:image :status]))
         (seq (str/trim (str (get-in db [:image :prompt]))))
-        (seq (str (get-in db [:image :model])))
-        (or (not (get-in db [:image :face-ref?]))
+        (if (get-in db [:image :free?])
+          (and (true? (get-in db [:image :publication-consent?]))
+               (<= (count (get-in db [:image :prompt])) 2000))
+          (seq (str (get-in db [:image :model]))))
+        (or (get-in db [:image :free?]) (not (get-in db [:image :face-ref?]))
             (face-enrolled? db)))))
 
 (defn image-job-body
@@ -231,6 +234,7 @@
   [db model-id]
   (-> db
       (assoc-in [:image :model] (str model-id))
+      (assoc-in [:image :free?] (= "animagine-xl-4.0" (str model-id)))
       (assoc :tab :image)))
 
 ;; ---- face -------------------------------------------------------------------
@@ -330,3 +334,17 @@
   (-> db
       (assoc-in [:douga :status] :failed)
       (assoc-in [:douga :error] message)))
+
+(defn free-image-result [db result]
+  (let [url (:image result)
+        id (or (get-in result [:artifact :id]) (new-id "free"))]
+    (if-not (and (string? url) (str/starts-with? url "data:image/png;base64,iVBOR"))
+      (image-failed db "生成結果を確認できませんでした。")
+      (-> db
+          (assoc-in [:image :status] :done)
+          (assoc-in [:image :model] "animagine-xl-4.0")
+          (assoc-in [:image :elapsed-ms] (* 1000 (or (:elapsed_seconds result) 0)))
+          (assoc-in [:image :remaining] (:remaining result))
+          (assoc-in [:image :job] {:job/id id :job/status :done :job/artifact-url url})
+          (update :works conj {:id id :kind :image :prompt (get-in db [:image :prompt])
+                               :model "animagine-xl-4.0" :face? false :at (now-ms) :url url})))))

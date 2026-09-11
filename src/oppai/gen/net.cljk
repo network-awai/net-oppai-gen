@@ -36,6 +36,10 @@
                    (:error body)
                    (:message body))]
     (cond
+      (= (get-in body [:error :code]) "preview_busy") "無料生成枠が使用中です。少し待ってから再試行してください。"
+      (= (get-in body [:error :code]) "daily_limit") "本日の無料生成回数を使い切りました。日本時間9時にリセットされます。"
+      (= (get-in body [:error :code]) "daily_capacity") "本日の無料生成枠が満了しました。日本時間9時以降に再試行してください。"
+      (= (get-in body [:error :code]) "preview_unavailable") "無料生成ノードが応答しませんでした。時間をおいて再試行してください。料金は発生しません。"
       (= detail "insufficient credits")
       (str "運営側の生成クレジットが不足しています（必要 " (:cost body)
            " / 残高 " (:balance body) "）。補充後に再試行してください。")
@@ -262,3 +266,6 @@
 
 (defn fetch-payments! [callbacks]
   (fetch-json! "/api/payments" callbacks))
+
+(defn submit-free-image! [callbacks]
+  (fetch-json! "/api/free/image" (assoc callbacks :method "POST")))

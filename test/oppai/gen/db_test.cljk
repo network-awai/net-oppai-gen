@@ -76,7 +76,8 @@
 (deftest image-readiness-requires-a-face-when-one-was-asked-for
   (let [d (-> (db/initial-db)
               (db/fleet-loaded (fleet/parse-image-models node-models))
-              (assoc-in [:image :prompt] "portrait"))]
+              (assoc-in [:image :prompt] "portrait")
+              (assoc-in [:image :free?] false))]
     (is (db/image-ready? d))
     (let [asked (assoc-in d [:image :face-ref?] true)]
       (is (not (db/image-ready? asked)) "asked for a face, none enrolled")
@@ -169,7 +170,7 @@
   ;; empty prompt or while one is already in flight.
   (let [d (db/fleet-loaded (db/initial-db) (fleet/parse-image-models node-models))]
     (is (false? (db/image-ready? d)))
-    (let [d (assoc-in d [:image :prompt] "a garden")]
+    (let [d (-> d (assoc-in [:image :prompt] "a garden") (assoc-in [:image :publication-consent?] true))]
       (is (true? (db/image-ready? d)))
       (is (false? (db/image-ready? (db/begin-image d)))))))
 
@@ -213,3 +214,18 @@
         "the pre-submit db ends on the assistant welcome — never send this")
     (is (= "user" (:role (last (db/chat-messages-for-api post)))))
     (is (= "こんにちは" (:content (last (db/chat-messages-for-api post)))))))
+
+(deftest free-generation-requires-current-publication-consent
+  (let [d (assoc-in (db/initial-db) [:image :prompt] "a garden")]
+    (is (false? (db/image-ready? d)))
+    (is (true? (db/image-ready? (assoc-in d [:image :publication-consent?] true))))
+    (is (false? (db/image-ready? (-> d (assoc-in [:image :publication-consent?] true)
+                                   (assoc-in [:image :prompt] (apply str (repeat 2001 "a")))))))))
+
+(deftest free-results-retain-canonical-model-and-private-shelf
+  (let [d (db/free-image-result (db/initial-db)
+                               {:image "data:image/png;base64,iVBORtest" :elapsed_seconds 2 :remaining 4})]
+    (is (= :done (get-in d [:image :status])))
+    (is (= "animagine-xl-4.0" (:model (first (:works d)))))
+    (is (= false (:face? (first (:works d)))))
+    (is (= 4 (get-in d [:image :remaining])))))
