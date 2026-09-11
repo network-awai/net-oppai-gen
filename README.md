@@ -83,8 +83,7 @@ loopback、receipt ledger）。**モデルは呼ばない** —— prompt は se
 | `:real-mix` | waiREALMIX_v11 | benjamin, simeon | txt2img（SDXL、写実） |
 | `:real-cn` | waiREALCN_v150 | dan, joseph | txt2img（SDXL、写実・アジア系） |
 | `:anime` | waiIllustriousSDXL_v150 | zebulun | txt2img（Danbooru タグ） |
-| `:video-ltx` | ltxv-2b-0.9.6-distilled | naphtali, issachar | t2v 3 s |
-| `:video-svd` | svd_xt | asher | i2v（pass した静止画から） |
+| `:video-ltx` | ltxv-2b-0.9.6-distilled | naphtali, issachar, asher | t2v 3 s |
 | `:voice` | Qwen3-TTS 1.7B (mlx-audio, ono_anna) | judah, levi | 日本語の短い台詞 |
 | `:eros-h3` | 10Eros-Max（MiniMax-H3 finetune） | gad | ref2va 動画、generation API 経由 |
 
@@ -105,6 +104,8 @@ loop は `deploy/network.awai.bot.oppai-studio.plist`（5 分毎、install 手�
 
 実測 2026-09-11（初回 tick）: SDXL 832×1216 / 26 steps は 16 GiB M4 で **165 s/枚**
 （cold、`Unloaded partially` を含む）。Qwen3-TTS は 4.4 s の台詞を 8 s（cold load 込み）。
+LTX 704×480×73f は 5 分台。**SVD-XT は 16 GiB では 1 step 215〜280 s**（576×1024×24f、
+UNet が常駐できない）で 1 clip 1.5 時間 —— asher は同日 LTX に切り替えた。
 **ここに書いた値は当日の値**であって定数ではない —— `--report` が今日の値を持つ。
 
 ## 開発

@@ -123,7 +123,7 @@
                   "dan" "waiREALCN_v150.safetensors" "joseph" "waiREALCN_v150.safetensors"
                   "zebulun" "waiIllustriousSDXL_v150.safetensors"
                   "naphtali" "ltxv-2b-0.9.6-distilled-04-25.safetensors" "issachar" "ltxv-2b-0.9.6-distilled-04-25.safetensors"
-                  "asher" "svd_xt.safetensors" "judah" "qwen3-tts" "levi" "qwen3-tts" "gad" "10eros-max"}]
+                  "asher" "ltxv-2b-0.9.6-distilled-04-25.safetensors" "judah" "qwen3-tts" "levi" "qwen3-tts" "gad" "10eros-max"}]
     (doseq [l (:bot/lanes profile) n (:lane/nodes l)]
       (is (= (declared n) (or (:lane/checkpoint l) (:lane/model l))) (str n " is declared for " (declared n))))))
 
@@ -158,6 +158,19 @@
     (is (= :pass (:verdict (bot/quality profile {:kind :audio :bytes 30000 :seconds 2.0}))))))
 
 ;; ---- graphs -----------------------------------------------------------------------
+
+(deftest the-svd-kind-is-still-composable-for-a-node-that-can-afford-it
+  ;; No lane uses :svd-i2v since asher moved to LTX (2026-09-11), but the kind
+  ;; and its graph remain: a profile can bring it back without code.
+  (let [p (update profile :bot/lanes conj {:lane/id :video-svd :lane/kind :svd-i2v :lane/model "svd_xt"
+                                            :lane/checkpoint "svd_xt.safetensors" :lane/nodes ["hypothetical"]
+                                            :lane/source-lanes [:real-mix] :lane/seconds 2 :lane/fps 12
+                                            :lane/width 576 :lane/height 1024 :lane/steps 20})
+        job (bot/compose p :video-svd 0)
+        g (bot/graph (assoc job :image "x.png") "oppai-svd")]
+    (is (= :svd-i2v (:kind job)))
+    (is (= 24 (get-in g ["4" :inputs :video_frames])))
+    (is (= "x.png" (get-in g ["2" :inputs :image])))))
 
 (deftest graphs-carry-the-job-verbatim
   (let [job (bot/compose profile :real-mix 5)
