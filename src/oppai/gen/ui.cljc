@@ -121,13 +121,16 @@
 ;; ---- primitives DADS does not ship (oppai-*) --------------------------------
 
 (defn tab-bar
-  "Top-level surface switch. items: [{:id :label :icon}]."
+  "Top-level surface switch. items: [{:id :label :icon :fragment}] — the
+  route table. Real links to the fragment, so a view is an address a person
+  can copy and the back button works; `hashchange` feeds the state
+  (ADR-2608080100)."
   [{:keys [items active on-select]}]
   (into [:nav {:class "oppai-tabs" :aria-label "モード"}]
-        (map (fn [{:keys [id label icon]}]
-               (cond-> [:button {:type "button"
-                                 :class (str "oppai-tab" (when (= id active) " is-active"))
-                                 :aria-current (when (= id active) "page")}
+        (map (fn [{:keys [id label icon fragment]}]
+               (cond-> [:a {:href (str "#" fragment)
+                            :class (str "oppai-tab" (when (= id active) " is-active"))
+                            :aria-current (when (= id active) "page")}
                         [:span {:class "oppai-tab-icon" :aria-hidden "true"} icon]
                         [:span label]]
                  on-select (on-click #(on-select id))))

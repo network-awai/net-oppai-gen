@@ -1,10 +1,11 @@
 .cpcache/
+.DS_Store
+.nrepl-port
 .shadow-cljs/
+.wrangler/
+dist/
+e2e-shots/
 node_modules/
 public/assets/
 public/index.html
-dist/
 target/
-.nrepl-port
-.DS_Store
-e2e-shots/

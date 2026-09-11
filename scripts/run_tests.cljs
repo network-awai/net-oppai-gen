@@ -7,10 +7,13 @@
   failure or error."
   (:require [cljs.test :as t]
             [node-io]
+            [oppai.gen.catalog-test]
             [oppai.gen.chat-test]
             [oppai.gen.db-test]
             [oppai.gen.fleet-test]
             [oppai.gen.gate-test]
+            [oppai.gen.guard-test]
+            [oppai.gen.route-test]
             [oppai.gen.site-test]))
 
 (node-io/install!)
@@ -20,8 +23,11 @@
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (js/process.exit (if (t/successful? m) 0 1)))
 
-(t/run-tests 'oppai.gen.chat-test
+(t/run-tests 'oppai.gen.catalog-test
+             'oppai.gen.chat-test
              'oppai.gen.db-test
              'oppai.gen.fleet-test
              'oppai.gen.gate-test
+             'oppai.gen.guard-test
+             'oppai.gen.route-test
              'oppai.gen.site-test)

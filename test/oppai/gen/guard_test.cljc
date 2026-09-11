@@ -1,0 +1,131 @@
+(ns oppai.gen.guard-test
+  "The R18 boundary and the consent boundary. Every negative here pins the
+  literal reason (CLAUDE.md 8 問 #6): a refusal for a different reason is not
+  the refusal this test claims."
+  (:require [clojure.test :refer [deftest is testing]]
+            [kotoba.lang.text :as str]
+            [oppai.gen.guard :as guard]))
+
+(def png-uri (str "data:image/png;base64," (apply str (repeat 400 "QUJD"))))
+
+(deftest minors-are-named-by-substring-and-by-token
+  (is (guard/minor? "1girl, loli, nude"))
+  (is (guard/minor? "かわいい女子高生"))
+  (is (guard/minor? "少女の肖像"))
+  (is (guard/minor? "JK uniform") "two-letter abbreviation as a token")
+  (is (guard/minor? "Teenage dream"))
+  (is (not (guard/minor? "1girl, adult woman, nude")))
+  (is (not (guard/minor? "json config, jkl keys")) "jk/js inside longer tokens are not the abbreviation")
+  (is (not (guard/minor? "mature woman, milf"))))
+
+(deftest every-image-job-carries-the-minor-negative
+  (is (= guard/minor-negative (guard/with-minor-negative "")))
+  (is (= guard/minor-negative (guard/with-minor-negative nil)))
+  (is (str/ends-with? (guard/with-minor-negative "lowres") (str ", " guard/minor-negative)))
+  (is (str/starts-with? (guard/with-minor-negative "lowres") "lowres")))
+
+(deftest image-job-shapes-a-valid-request
+  (let [[body err] (guard/image-job {:prompt " portrait " :model "waiREALMIX_v11"
+                                     :size "832x1216" :negative "lowres" :steps 20 :seed 5})]
+    (is (nil? err))
+    (is (= "image" (:type body)))
+    (is (= "portrait" (get-in body [:input :prompt])) "trimmed")
+    (is (not (contains? (:input body) :face_ref)))
+    (is (= {:model "waiREALMIX_v11" :width 832 :height 1216 :steps 20 :seed 5
+            :negative_prompt (str "lowres, " guard/minor-negative)}
+           (:params body)))))
+
+(deftest image-job-with-face-ref-carries-no-face-bytes
+  (let [[body err] (guard/image-job {:prompt "p" :model "m" :size "1024x1024"
+                                     :face-ref? true :face-mode "faceid" :face-weight 9})]
+    (is (nil? err))
+    (is (true? (get-in body [:input :face_ref])))
+    (is (not (contains? (:input body) :face)) "the browser never carries face bytes")
+    (is (= "faceid" (get-in body [:params :face_mode])))
+    (is (= guard/face-weight-max (get-in body [:params :face_weight])) "clamped to the max")
+    (is (= guard/face-weight-max (guard/clamp-weight 1.5)) "the boundary is inside")
+    (is (= guard/face-weight-min (guard/clamp-weight 0.1)))
+    (is (= guard/face-weight-min (guard/clamp-weight 0.0999)))))
+
+(deftest image-job-refusals-name-their-reason
+  (doseq [[intent reason] [[{:prompt "" :model "m" :size "1024x1024"} "空"]
+                           [{:prompt (apply str (repeat 2001 "a")) :model "m" :size "1024x1024"} "長すぎ"]
+                           [{:prompt "loli" :model "m" :size "1024x1024"} "未成年"]
+                           [{:prompt "p" :model "" :size "1024x1024"} "モデル"]
+                           [{:prompt "p" :model "m" :size "1000x1000"} "サイズ"]]]
+    (let [[body err] (guard/image-job intent)]
+      (is (nil? body))
+      (is (str/includes? (str err) reason) (str intent " -> " err)))))
+
+(deftest sanitize-refuses-a-browser-supplied-face
+  (let [[_ err] (guard/sanitize-image-job {:type "image" :input {:prompt "p" :face png-uri}
+                                            :params {:model "m"}} nil)]
+    (is (str/includes? err "input.face is not accepted")))
+  (let [[_ err] (guard/sanitize-image-job {:type "image" :input {:prompt "p" :face_ref true}
+                                            :params {:model "m"}} nil)]
+    (is (str/includes? err "no enrolled face")))
+  (let [[_ err] (guard/sanitize-image-job {:type "image" :input {:prompt "shota"}
+                                            :params {:model "m"}} nil)]
+    (is (str/includes? err "minor")))
+  (let [[_ err] (guard/sanitize-image-job {:type "video" :input {:prompt "p"}} nil)]
+    (is (str/includes? err "type must be image"))))
+
+(deftest sanitize-substitutes-the-enrolled-face-and-appends-the-negative
+  (let [[body err] (guard/sanitize-image-job
+                    {:type "image" :input {:prompt "p" :face_ref true}
+                     :params {:model "m" :width 832 :height 1216 :steps 20 :seed 1
+                              :face_mode "plus-face" :face_weight 0.8
+                              :negative_prompt "lowres" :license "cc0" :extra "dropped"}}
+                    png-uri)]
+    (is (nil? err))
+    (is (= png-uri (get-in body [:input :face])))
+    (is (not (contains? (:input body) :face_ref)) "face_ref is ours, not the fleet's")
+    (is (= (str "lowres, " guard/minor-negative) (get-in body [:params :negative_prompt])))
+    (is (not (contains? (:params body) :extra)))
+    (is (not (contains? (:params body) :license))))
+  (testing "without face_ref the enrolment is not attached even when one exists"
+    (let [[body _] (guard/sanitize-image-job {:type "image" :input {:prompt "p"} :params {:model "m"}}
+                                             png-uri)]
+      (is (not (contains? (:input body) :face))))))
+
+(deftest challenge-window-boundary
+  (let [t 1000000]
+    (is (guard/challenge-valid? t t))
+    (is (guard/challenge-valid? t (+ t guard/challenge-ttl-ms)) "the last instant is inside")
+    (is (not (guard/challenge-valid? t (+ t guard/challenge-ttl-ms 1))) "one ms later is outside")
+    (is (not (guard/challenge-valid? t (dec t))) "before issue is outside")
+    (is (not (guard/challenge-valid? nil t)))))
+
+(deftest data-uri-size-boundary
+  (let [cap (+ 128 (quot (* guard/face-max-bytes 4) 3))
+        prefix "data:image/jpeg;base64,"
+        at-cap (str prefix (apply str (repeat (- cap (count prefix)) "A")))]
+    (is (guard/data-uri-ok? at-cap))
+    (is (not (guard/data-uri-ok? (str at-cap "A"))))
+    (is (not (guard/data-uri-ok? "https://example.com/x.png")))
+    (is (not (guard/data-uri-ok? "data:image/gif;base64,AAAA")))))
+
+(deftest enrolment-validation
+  (let [t 5000000
+        challenge {:issued-at t :gesture "口を開けてください" :used? false}
+        ok {:nonce "n" :frames [png-uri png-uri] :consent true}]
+    (let [[record err] (guard/validate-enrolment ok challenge (+ t 30000))]
+      (is (nil? err))
+      (is (= png-uri (:frame record)) "the neutral frame is the reference")
+      (is (= "口を開けてください" (:gesture record)))
+      (is (= (+ t 30000 (* 1000 guard/enrolment-ttl-s)) (:expires-at record)))
+      (is (true? (get-in record [:consent :self-only])))
+      (is (guard/enrolment-active? record (+ t 30001)))
+      (is (not (guard/enrolment-active? record (:expires-at record))) "expiry instant is outside")
+      (is (= #{:frame :gesture :enrolled-at :expires-at} (set (keys (guard/public-face record))))))
+    (doseq [[body ch now reason]
+            [[(assoc ok :nonce "") challenge t "nonce required"]
+             [ok nil t "unknown or expired"]
+             [ok (assoc challenge :used? true) t "already used"]
+             [ok challenge (+ t guard/challenge-ttl-ms 1) "window closed"]
+             [(assoc ok :consent false) challenge t "consent"]
+             [(assoc ok :frames [png-uri]) challenge t "exactly two"]
+             [(assoc ok :frames [png-uri "nope"]) challenge t "data URIs"]]]
+      (let [[record err] (guard/validate-enrolment body ch now)]
+        (is (nil? record))
+        (is (str/includes? (str err) reason) (str reason " -> " err))))))

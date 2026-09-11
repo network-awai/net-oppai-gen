@@ -114,10 +114,13 @@
     (is (str/includes? label "推定") "an unconfirmed id is labelled, not smoothed over")))
 
 (deftest tab-bar-marks-the-current-surface-for-assistive-tech
-  (let [node (ui/tab-bar {:items [{:id :chat :label "チャット" :icon "◇"}
-                                  {:id :image :label "画像" :icon "▣"}]
+  ;; Links, not buttons: a view is an address (ADR-2608080100), so the nav
+  ;; is real anchors to the fragment and the back button works.
+  (let [node (ui/tab-bar {:items [{:id :chat :label "チャット" :icon "◇" :fragment "chat"}
+                                  {:id :image :label "画像" :icon "▣" :fragment "image"}]
                           :active :image})
-        buttons (->> (tree-seq coll? seq node)
-                     (filter #(and (vector? %) (= :button (first %)))))]
-    (is (= 2 (count buttons)))
-    (is (= [nil "page"] (mapv #(:aria-current (second %)) buttons)))))
+        links (->> (tree-seq coll? seq node)
+                   (filter #(and (vector? %) (= :a (first %)))))]
+    (is (= 2 (count links)))
+    (is (= ["#chat" "#image"] (mapv #(:href (second %)) links)))
+    (is (= [nil "page"] (mapv #(:aria-current (second %)) links)))))

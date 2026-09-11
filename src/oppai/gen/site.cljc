@@ -57,10 +57,10 @@
     #?(:clj (do (io/make-parents (io/file rel)) (spit (io/file rel) text))
        :cljs (throw (ex-info "no :write! hook installed — call install-io!" {:path rel})))))
 
-(def page-title "oppai.fans — R18 画像・動画生成（成人向け）")
+(def page-title "oppai.fans — R18 画像・動画生成・自分の顔で生成（成人向け）")
 
 (def page-description
-  "oppai.fans は成人向け（R18）の画像・動画生成サービスです。18 歳未満の利用は禁止です。チャット・画像・動画を、自社運用の Mac mini フリート（murakumo）で生成します。")
+  "oppai.fans は成人向け（R18）の画像・動画生成サービスです。18 歳未満の利用は禁止です。画像・動画・自分の顔を使った生成を、自社運用の murakumo フリートで行います。")
 
 (def age-gate-head
   "R18 declaration for the whole site: advisory rating + noindex for the app
@@ -244,7 +244,8 @@
                                   :color "var(--hig-color-secondary-label)"}]
 
     [".oppai-tabs" {:display :flex :gap "4px" :flex-wrap :wrap}]
-    [".oppai-tab" {:appearance :none :cursor :pointer
+    [".oppai-tab" {:text-decoration :none
+                  :appearance :none :cursor :pointer
                   :display :inline-flex :align-items :center :gap "6px"
                   :min-height "44px" :padding "0 16px"
                   :border "1px solid var(--hig-color-separator)"
@@ -385,7 +386,69 @@
     [".oppai-gate-actions" {:display :flex
                             :flex-direction :column
                             :gap "12px"
-                            :align-items :flex-start}]]
+                            :align-items :flex-start}]
+
+    ;; --- catalog / works cards ------------------------------------------------
+    [".oppai-lead" {:margin "0 0 16px" :font-size "0.9375rem" :line-height 1.7
+                   :color "var(--hig-color-secondary-label)"}]
+    [".oppai-cards" {:display :grid :gap "16px"
+                    :grid-template-columns "repeat(auto-fill, minmax(260px, 1fr))"}]
+    [".oppai-card, .oppai-work" {:display :flex :flex-direction :column :gap "8px"
+                                :padding "16px"
+                                :background "var(--hig-color-system-background)"
+                                :border "1px solid var(--hig-color-separator)"
+                                :border-radius "var(--oppai-radius)"}]
+    [".oppai-card.is-unavailable" {:opacity 0.6}]
+    [".oppai-card-head" {:display :flex :justify-content "space-between"
+                        :align-items :center :gap "8px"}]
+    [".oppai-card-title" {:margin 0 :font-size "1.0625rem" :font-weight 700}]
+    [".oppai-card-meta" {:margin 0 :font-size "0.8125rem"
+                        :color "var(--hig-color-secondary-label)"}]
+    [".oppai-card-lead" {:margin 0 :font-size "0.9375rem" :line-height 1.6}]
+    [".oppai-card-actions" {:margin-top :auto :padding-top "8px"}]
+    [".oppai-work" {:padding 0 :overflow :hidden}]
+    [".oppai-work-media" {:width "100%" :height :auto :display :block
+                         :aspect-ratio "832 / 1216" :object-fit :cover
+                         :background "var(--hig-color-secondary-system-background)"}]
+    [".oppai-work-body" {:display :flex :flex-direction :column :gap "6px" :padding "12px 16px 16px"}]
+    [".oppai-work-prompt" {:margin 0 :font-size "0.875rem" :line-height 1.5
+                          :display "-webkit-box" :-webkit-line-clamp 3
+                          :-webkit-box-orient :vertical :overflow :hidden}]
+    [".oppai-link" {:color "var(--hig-color-tint)" :font-size "0.875rem"}]
+
+    ;; --- presets / face controls ---------------------------------------------------
+    [".oppai-presets" {:display :flex :flex-wrap :wrap :gap "8px" :margin-bottom "4px"}]
+    [".oppai-check" {:display :flex :gap "10px" :align-items :flex-start
+                    :font-size "0.9375rem" :line-height 1.6 :cursor :pointer}]
+    [".oppai-check input" {:width "20px" :height "20px" :margin "2px 0 0" :flex "none"}]
+    [".oppai-face-toggle" {:display :flex :flex-direction :column :gap "12px"
+                          :padding "12px 16px"
+                          :border "1px dashed var(--hig-color-separator)"
+                          :border-radius "var(--oppai-radius)"}]
+    [".oppai-range" {:width "100%"}]
+
+    ;; --- camera ceremony ---------------------------------------------------------------
+    [".oppai-camera" {:display :flex :flex-direction :column :gap "12px" :margin "16px 0"}]
+    [".oppai-camera-video" {:width "min(100%, 360px)" :aspect-ratio "1 / 1" :object-fit :cover
+                           :border-radius "var(--oppai-radius)"
+                           :background "var(--hig-color-label)"
+                           :transform "scaleX(-1)"}]
+    [".oppai-camera-steps" {:display :flex :flex-direction :column :gap "4px"}]
+    [".oppai-step" {:margin 0 :font-size "0.9375rem"}]
+    [".oppai-step.is-done" {:color "var(--hig-color-secondary-label)"
+                           :text-decoration "line-through"}]
+    [".oppai-captures" {:display :flex :gap "8px"}]
+    [".oppai-capture" {:width "120px" :height "120px" :object-fit :cover
+                      :border-radius "var(--oppai-radius)"
+                      :border "1px solid var(--hig-color-separator)"}]
+    [".oppai-face-enrolled" {:display :flex :gap "16px" :align-items :flex-start
+                            :flex-wrap :wrap :margin-top "16px"}]
+    [".oppai-face-note" {:margin "0 0 16px"}]
+    [".oppai-keyframe" {:display :flex :gap "16px" :align-items :flex-start
+                       :padding "12px" :margin-bottom "12px"
+                       :border "1px dashed var(--hig-color-separator)"
+                       :border-radius "var(--oppai-radius)"}]
+    [".oppai-keyframe-img" {:width "120px" :height :auto :border-radius "var(--oppai-radius)"}]]
 
    :keyframes
    [[:oppai-spin [[0 {:transform "rotate(0deg)"}] [100 {:transform "rotate(360deg)"}]]]]
@@ -399,6 +462,7 @@
       [".oppai-banner-models" {:grid-template-columns "1fr"}]
       [".oppai-studio-header" {:align-items :flex-start :flex-direction :column}]
       [".oppai-form" {:padding "16px"}]
+      [".oppai-cards" {:grid-template-columns "1fr"}]
       [".oppai-message-inner" {:grid-template-columns "28px minmax(0, 1fr)" :gap "8px"}]
       [".oppai-avatar" {:width "28px" :height "28px" :font-size "0.6875rem"}]]]
 

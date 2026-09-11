@@ -1,0 +1,129 @@
+(ns oppai.gen.catalog
+  "The model catalog — what a civitai / tensorhub visitor expects to browse
+  before typing a prompt: which checkpoint draws what, how it wants to be
+  prompted, and a handful of one-click presets.
+
+  Two sources, kept apart on purpose:
+
+  - **Cards** (this file) are editorial: base, style, how explicit the model
+    can go, quality tags, presets. Written by a person, versioned in git.
+  - **Availability** comes from the fleet at runtime
+    (`GET /v1/generation/image-models` on the generation node, through our
+    Worker). A card whose id the node does not list is shown as 未搭載, never
+    hidden — a visitor should see what exists and what is on the machine
+    today, and those are different facts (ADR-2607173100: a model id in this
+    file is a *description*, never the truth about what is loaded).
+
+  Ids are the bare checkpoint filename the node derives (`waiREALMIX_v11` for
+  `waiREALMIX_v11.safetensors`), which is what the job API accepts back.
+
+  R18 boundary lives here too: every preset is an ADULT subject, and the
+  negative prompt every card carries is appended server-side as well
+  (`oppai.gen.guard/minor-negative`) — the card copy is for the person, the
+  guard is for the machine."
+  (:require [kotoba.lang.text :as str]))
+
+(def rating-labels
+  "How far a checkpoint goes. `:explicit` = trained on explicit material and
+  responds to explicit tags; `:suggestive` = lingerie/swimwear reliable,
+  explicit output hit-or-miss."
+  {:explicit "R18 / 明示的" :suggestive "R15〜 / 露出" :sfw "全年齢寄り"})
+
+(def cards
+  [{:id "waiREALMIX_v11"
+    :name "WAI-REALMIX v11"
+    :base "SDXL 1.0"
+    :style :realistic
+    :rating :explicit
+    :tagline "写実。肌・光・質感が強い R18 向けマージ。"
+    :quality "photorealistic, (best quality:1.2), detailed skin, natural lighting"
+    :negative "lowres, bad anatomy, bad hands, extra fingers, worst quality, watermark, text"
+    :prompt-style :natural
+    :face-friendly? true
+    :hint "写真調。顔参照（自分の顔）との相性が最も良い。"}
+   {:id "waiREALCN_v150"
+    :name "WAI-REALCN v1.5"
+    :base "SDXL 1.0"
+    :style :realistic
+    :rating :explicit
+    :tagline "写実・アジア系の顔立ちが安定する。"
+    :quality "photorealistic, (best quality:1.2), sharp focus, detailed face"
+    :negative "lowres, bad anatomy, bad hands, extra fingers, worst quality, watermark, text"
+    :prompt-style :natural
+    :face-friendly? true
+    :hint "写真調。日本語話者の顔立ちに寄る。"}
+   {:id "Illustrious-XL-v2.0"
+    :name "Illustrious XL v2.0"
+    :base "SDXL 1.0 (Illustrious)"
+    :style :anime
+    :rating :explicit
+    :tagline "Danbooru タグで描くアニメ塗り。R18 タグをそのまま理解する。"
+    :quality "masterpiece, best quality, very aesthetic, absurdres"
+    :negative "lowres, worst quality, low quality, bad anatomy, bad hands, watermark, signature"
+    :prompt-style :tags
+    :face-friendly? false
+    :hint "タグ列（1girl, adult, …）で書く。"}
+   {:id "animagine-xl-4.0"
+    :name "Animagine XL 4.0"
+    :base "SDXL 1.0"
+    :style :anime
+    :rating :suggestive
+    :tagline "アニメ。露出は安定、明示的な描写はタグ次第。"
+    :quality "masterpiece, high score, great score, absurdres"
+    :negative "lowres, bad anatomy, bad hands, text, error, missing fingers, worst quality, low quality"
+    :prompt-style :tags
+    :face-friendly? false
+    :hint "タグ列。rating タグ（explicit / questionable）を末尾に。"}])
+
+(def presets
+  "One-click subjects, tensorhub-style. Every one names an ADULT explicitly;
+  the machine-side guard repeats the exclusion so this copy is never the only
+  line of defence."
+  [{:id :portrait :label "ポートレート"
+    :tags "1girl, adult woman, portrait, looking at viewer, soft lighting, bokeh"
+    :natural "portrait of an adult woman, looking at the camera, soft window light, shallow depth of field"}
+   {:id :swimsuit :label "水着"
+    :tags "1girl, adult woman, bikini, beach, sunset, wet skin, smile"
+    :natural "an adult woman in a bikini on a beach at sunset, wet skin, smiling"}
+   {:id :lingerie :label "ランジェリー"
+    :tags "1girl, adult woman, lingerie, bedroom, dim light, on bed, seductive"
+    :natural "an adult woman in lace lingerie on a bed, dim warm light, seductive pose"}
+   {:id :nude :label "ヌード（成人）"
+    :tags "1girl, adult woman, nude, completely nude, bedroom, soft light, rating:explicit"
+    :natural "a nude adult woman in a bedroom, soft morning light, tasteful, full body"}
+   {:id :couple :label "カップル（成人）"
+    :tags "1girl, 1boy, adults, couple, embrace, kiss, bedroom, rating:explicit"
+    :natural "an adult couple embracing in a bedroom, intimate, cinematic light"}])
+
+(def styles {:realistic "写実" :anime "アニメ"})
+
+(defn card-by-id [id]
+  (some #(when (= (str id) (:id %)) %) cards))
+
+(defn compose-prompt
+  "Preset + card → the prompt the studio starts from. Tag-style cards get the
+  tag list with quality tags first (how those checkpoints were trained);
+  natural-style cards get the sentence."
+  [card preset]
+  (let [body (if (= :tags (:prompt-style card)) (:tags preset) (:natural preset))]
+    (str/join ", " (remove str/blank? [(:quality card) body]))))
+
+(defn with-availability
+  "Cards + the node's live list → cards with `:available?`. Order: available
+  first, then by rating (explicit first — this is the point of the site),
+  then the catalog order. `live` nil means 'could not ask', and every card
+  says `:available? nil` rather than false, so the UI can distinguish
+  'not on the node' from 'did not hear back'."
+  [live]
+  (let [ids (when live (set (map str live)))
+        rank {:explicit 0 :suggestive 1 :sfw 2}]
+    (->> cards
+         (map (fn [c] (assoc c :available? (when ids (contains? ids (:id c))))))
+         (sort-by (fn [c] [(if (:available? c) 0 1) (rank (:rating c) 9)]))
+         vec)))
+
+(defn default-model
+  "First available card, else the first card — the picker must start on
+  something the node actually has whenever that is knowable."
+  [live]
+  (:id (first (with-availability live))))

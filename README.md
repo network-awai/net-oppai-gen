@@ -1,9 +1,43 @@
 # oppai.fans (net-oppai-gen)
 
-**成人向け（R18）の画像・動画生成サービス。** `oppai.fans` の Worker + SPA。
-生成そのものは**自社運用の murakumo Mac mini フリート**（`api.murakumo.cloud` /
-`generation.murakumo.cloud`）が担い、この repo は UI と capability token の
-保持だけを持つ（外部の生成 API は経由しない）。
+**成人向け（R18）の画像・動画生成サービス — civitai / tensorhub 型のモデル
+カタログと、本人の顔だけを使える顔参照つき。** `oppai.fans` の Worker + SPA。
+生成そのものは**自社運用の murakumo フリート**（`generation.murakumo.cloud`
+→ gad の ComfyUI）が担い、この repo は UI と capability token と
+顔登録の儀式だけを持つ（外部の生成 API は経由しない）。
+
+6 つの view（`#image` `#douga` `#face` `#models` `#works` `#chat`）を 1 文書・
+1 バンドルで持つ single-page app（ADR-2608080100）。view は `oppai.gen.route`
+の表が正で、nav はそこから生成される。
+
+## 顔参照（faceswap ではない — 設計上の決定、2026-09-11）
+
+「任意の写真の顔を載せる」機能は**作らない**。非同意の性的ディープフェイクの
+製造装置になるので、これは機能の欠落ではなく境界である。代わりに:
+
+- **登録できる顔は、いまカメラの前にいる本人の顔だけ。** ファイル入力は無い。
+  サーバが出す 60 秒・single-use の nonce と、向き/表情のお題（liveness）に
+  合わせて 2 枚撮り、明示的な同意にチェックして登録する（`oppai.gen.guard`）。
+  これは**同意の儀式であって本人確認ではない** — UI もそう言う。
+- 登録はこのブラウザにだけ紐づく（HttpOnly cookie → KV、7 日で消える、
+  いつでも削除できる）。
+- **ブラウザは `input.face` を送れない。** `input.face_ref true` を送り、Worker
+  が登録済みの frame を差し替えて fleet に渡す。`input.face` を持ち込んだ
+  request は 400。したがってこのサイト経由で fleet に届く顔は、儀式を通った
+  ものだけ。
+- fleet 側は pixel の貼り付けではなく **IP-Adapter（PLUS FACE / FaceID v2）
+  による identity 条件付け**（`kotoba-lang/murakumo` の generation API、
+  `type: image` + `input.face`）。生成物には `face-reference:<mode>` の
+  capability が付く。
+
+## R18 境界（サーバ側）
+
+- **未成年を名指す語**（`guard/minor-terms`、日英・略語）を含む prompt は
+  Worker が 400 で拒否する。合わせて**全 image job の negative prompt に
+  `guard/minor-negative` を必ず追記**する。カタログの preset は全て成人を
+  明示し、テストがそれを検査する。
+- fleet 側（murakumo gateway）の検査は独立に存在し、ここは二重に持たない
+  という従来の決定は、この 2 点（拒否 + negative）を足した上で据え置き。
 
 雛形は `network-awai/network-awai-apex`（awai.network）と同じ skin
 （jp-go-dds = デジタル庁デザインシステム / DADS）で、**コードは共有していない**
@@ -24,17 +58,23 @@
 
 | surface | 経路 | なぜ |
 |---|---|---|
-| 画像 | ブラウザ → 直接 `api.murakumo.cloud/v1/images/generations` | 無認証・CORS 全開。同期 60〜100 秒の GPU 処理を Cloudflare の 100 秒 subrequest 天井に通すと 524 になるので proxy しない |
-| モデル一覧 | ブラウザ → 直接 `api.murakumo.cloud/infer/model-map` | 同上（読み取り専用）。ComfyUI の実機スキャン結果をそのまま出す |
+| 画像 | Worker `/api/generation`（`type: image`、job）→ `generation.murakumo.cloud/api/v1/generation` | **2026-09-11 に browser 直の同期 `api.murakumo.cloud/v1/images/generations` から移した。** 同期 60〜100 秒は Worker の 100 秒天井に当たるが、job（submit → poll → artifact）には天井が無い。同じノードの同じ ComfyUI で、顔参照を運べる唯一の経路（無認証の公開 endpoint に顔を載せない） |
+| モデル一覧 | Worker `/api/image-models` → `…/v1/generation/image-models` | **そのノードの** ComfyUI が今持つチェックポイント。fleet 全体の `/infer/model-map` は別の mini のディスクを報告し、gad に無いモデルを選ばせて 502 になっていた |
+| 顔登録 | Worker `/api/face/challenge` `/api/face/enroll` `/api/face`（GET/DELETE） | 上記。KV `OPPAI_KV` |
 | チャット | Worker `/api/chat` → `api.murakumo.cloud/v1/chat/completions` | ストリーミングなので天井に当たらない。実行タグ付けと濫用抑制を 1 箇所に置く |
-| 動画 | Worker `/api/generation` → `generation.murakumo.cloud/api/v1/generation` | 署名付き capability token（`MURAKUMO_GENERATION_TOKEN`）が要る。鍵はブラウザに置かない |
+| 動画 | Worker `/api/generation`（`type: video`）→ 同上 | 署名付き capability token（`MURAKUMO_GENERATION_TOKEN`）が要る。鍵はブラウザに置かない。`input.image` に data URI を渡すと i2v（作品棚の「動画にする」） |
+
+「作品」（`#works`）は**この端末の localStorage** にある棚で、公開ギャラリーでは
+ない。公開・共有・アカウント（SIWE + Passkey）・クレジット（x402/USDC）は
+次の段（superproject ADR-2609111000 の gap 表）。
 
 ## 開発
 
 ```bash
 npm install
 npm run dev          # shadow-cljs watch (http://localhost:8790)
-npm test             # nbb（41 tests / 162 assertions、JVM を起こさない）
+npm test             # nbb（64 tests / 371 assertions、JVM を起こさない）
+npm run e2e          # 実 Chromium。OPPAI_E2E_BASE=http://127.0.0.1:8797 で wrangler dev の Worker 経路も検査
 clojure -M:local:lint   # clj-kondo。ここだけまだ JVM（clj-kondo は nbb で走らない）
 npm run build        # release build + index.html 生成（hash 済 bundle 名）
 npm run deploy       # build → wrangler deploy (oppai.fans)
@@ -42,14 +82,18 @@ npm run deploy       # build → wrangler deploy (oppai.fans)
 
 `npm test` / `npm run generate-site` は nbb で走る（オーナー判断 2026-09-06、
 `clojure -M` を JVM-free な経路へ置換）。classpath は package.json に書いた
-相対パスで、monorepo の sibling checkout（`../../kotoba-lang/*`）を指す ——
+相対パスで、monorepo の sibling checkout（`../../kotoba-lang/*`、`text` を
+含む — nbb は deps.edn を読まないので、`kotoba.lang.text` へ移った日から
+2026-09-11 まで `npm test` は main で赤だった）を指す ——
 以前の `:local` alias と同じ前提。別の場所に置くなら
 `OPPAI_RESOURCE_PATH` で dds.css の resource root を上書きする。
 
 Secret（deploy 時に `wrangler secret put`。repo に置かない）:
 
 - `MURAKUMO_GENERATION_TOKEN` — scope=generation の murakumo capability。
-  無い場合、動画スタジオは 503 とその理由を正直に表示する。
+  無い場合、画像・動画スタジオは 503 とその理由を正直に表示する。
+- KV binding `OPPAI_KV`（wrangler.jsonc）— 顔登録と challenge nonce。無い
+  場合、顔登録は 503 とその理由を表示し、他は動く。
 - `OPPAI_CHAT_MODEL` / `OPPAI_VIDEO_MODEL`（任意）— 未設定時は
   `murakumo-main` alias / クライアント選択（ADR-2607173100、model id を焼かない）。
 
@@ -59,12 +103,15 @@ Secret（deploy 時に `wrangler secret put`。repo に置かない）:
 wrangler.jsonc          oppai.fans custom domain、ASSETS binding
 src/oppai/gen/
   site.cljc             静的シェル生成（DADS inline、R18 head、gate CSS）
-  db.cljc               pure state 遷移（age gate 含む、JVM test 対象）
+  route.cljc            view 表（nav と fragment の正本）
+  catalog.cljc          モデルカード・preset（編集物。搭載状況は実行時に fleet から）
+  guard.cljc            R18 境界 + 同意儀式の pure 関数（Worker が enforce、test が検査）
+  db.cljc               pure state 遷移（age gate / face / works 含む）
   events.cljc / subs.cljc  re-frame
-  views.cljc            3 スタジオ + age gate
-  fleet.cljc            model-map 解析 / リクエスト整形（model id は導出値のみ）
-  net.cljs              browser I/O（上記の分岐表の実装）
-  worker.cljs           /api/*（chat proxy / generation token proxy / health）
-test/oppai/gen/         JVM tests（gate / db / fleet / chat / site）
+  views.cljc            6 view + age gate
+  fleet.cljc            ノードの model 一覧解析 / リクエスト整形（model id は導出値のみ）
+  net.cljs              browser I/O（カメラ・localStorage 含む）
+  worker.cljs           /api/*（generation token proxy / image-models / face / chat / health）
+test/oppai/gen/         nbb tests（gate / db / fleet / chat / site / guard / catalog / route）
 scripts/                E2E・prod smoke
 ```

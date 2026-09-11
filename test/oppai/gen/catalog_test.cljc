@@ -1,0 +1,44 @@
+(ns oppai.gen.catalog-test
+  (:require [clojure.test :refer [deftest is testing]]
+            [kotoba.lang.text :as str]
+            [oppai.gen.catalog :as catalog]
+            [oppai.gen.guard :as guard]))
+
+(deftest cards-are-well-formed
+  (doseq [c catalog/cards]
+    (is (re-matches #"[A-Za-z0-9._-]+" (:id c)) "a bare checkpoint id, no extension")
+    (is (contains? catalog/rating-labels (:rating c)))
+    (is (contains? catalog/styles (:style c)))
+    (is (#{:tags :natural} (:prompt-style c)))
+    (is (seq (:quality c)))
+    (is (seq (:negative c))))
+  (is (= (count catalog/cards) (count (set (map :id catalog/cards)))) "ids unique"))
+
+(deftest presets-name-adults-and-never-minors
+  (doseq [p catalog/presets
+          text [(:tags p) (:natural p)]]
+    (is (str/includes? (str/lower text) "adult") (str (:id p) " must say adult"))
+    (is (not (guard/minor? text)) (str (:id p) " must pass the guard"))))
+
+(deftest compose-prompt-follows-the-card-style
+  (let [tags (catalog/card-by-id "Illustrious-XL-v2.0")
+        nat (catalog/card-by-id "waiREALMIX_v11")
+        p (first catalog/presets)]
+    (is (str/starts-with? (catalog/compose-prompt tags p) (:quality tags)))
+    (is (str/includes? (catalog/compose-prompt tags p) (:tags p)))
+    (is (str/includes? (catalog/compose-prompt nat p) (:natural p)))
+    (is (not (str/includes? (catalog/compose-prompt nat p) (:tags p))))))
+
+(deftest availability-is-a-three-valued-fact
+  (testing "unknown: nothing was heard from the node"
+    (is (every? #(nil? (:available? %)) (catalog/with-availability nil))))
+  (testing "known: available first, explicit first within, unavailable shown not hidden"
+    (let [cards (catalog/with-availability ["animagine-xl-4.0" "waiREALMIX_v11" "ltx-2.3"])
+          ids (mapv :id cards)]
+      (is (= (count catalog/cards) (count cards)))
+      (is (= "waiREALMIX_v11" (first ids)) "explicit beats suggestive among available")
+      (is (= "animagine-xl-4.0" (second ids)))
+      (is (every? false? (map :available? (drop 2 cards))))
+      (is (= "waiREALMIX_v11" (catalog/default-model ["animagine-xl-4.0" "waiREALMIX_v11"])))))
+  (testing "nothing available: the first card is still a default"
+    (is (= (:id (first (catalog/with-availability []))) (catalog/default-model [])))))

@@ -17,6 +17,8 @@
 #?(:cljs
    (defn init []
      (rf/dispatch-sync [:app/initialize])
+     (.addEventListener js/window "hashchange"
+                        (fn [_] (rf/dispatch [:ui/fragment js/location.hash])))
      (mount!)))
 
 #?(:clj (defn init [] nil))
