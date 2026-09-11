@@ -29,6 +29,12 @@
   load (100+, many concurrent agents) before the tick even started. PATH is
   set explicitly above, so nothing in the profile is needed.
 
+  No ProcessType=Background: measured 2026-09-11 21:22, load average 134 on
+  this workstation, a Background-class tick sat 6 minutes in V8's parser at
+  0% CPU before running a line of the script. The tick is the only thing
+  keeping eight GPUs fed; it does not get to be the lowest-priority process
+  on the box.
+
   State and artifacts: ~/.itonami/oppai-studio/ (receipts.edn is append-only).
   lock: ~/.itonami/oppai-studio/tick.lock (a tick that finds a fresh lock exits 2).
 -->
@@ -67,8 +73,6 @@
 	<string>/Users/junkawasaki/.itonami/oppai-studio/tick.log</string>
 	<key>StartInterval</key>
 	<integer>300</integer>
-	<key>ProcessType</key>
-	<string>Background</string>
 	<key>WorkingDirectory</key>
 	<string>/Users/junkawasaki/github/com-junkawasaki/orgs/network-awai/fans-oppai</string>
 </dict>
