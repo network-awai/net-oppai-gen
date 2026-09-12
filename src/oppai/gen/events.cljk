@@ -18,7 +18,7 @@
               works (or (net/load-works) [])]
           {:db (cond-> (-> (db/initial-db)
                            (db/works-loaded works)
-                           (db/set-tab (route/fragment->view js/location.hash)))
+                           (db/navigate-fragment js/location.hash))
                  confirmed (db/confirm-age))
            :fx (when confirmed [[:fleet/fetch nil] [:face/fetch nil] [:payments/fetch nil]])})))
 
@@ -41,9 +41,9 @@
      (rf/reg-fx :route/fragment
                 (fn [fragment]
                   (when (not= fragment js/location.hash)
-                    (js/history.replaceState nil "" fragment))))
+                    (set! js/location.hash fragment))))
 
-     (rf/reg-event-db :ui/fragment (fn [db [_ hash]] (db/set-tab db (route/fragment->view hash))))
+     (rf/reg-event-db :ui/fragment (fn [db [_ hash]] (db/navigate-fragment db hash)))
 
      (rf/reg-fx :works/persist (fn [works] (net/save-works! works)))
      (rf/reg-event-fx :works/remove
@@ -146,6 +146,14 @@
                                (not (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"}
                                                (get-in db [:image :model]))))
                           (assoc-in [:image :model] "animagine-xl-4.0"))))
+     (rf/reg-event-fx :work/remix
+                      (fn [{:keys [db]} [_ id]]
+                        {:db (db/remix-work db id)
+                         :fx [[:route/fragment "#image"]]}))
+     (rf/reg-event-fx :producer/brief
+                      (fn [{:keys [db]} [_ id]]
+                        {:db (db/producer-brief db id)
+                         :fx [[:route/fragment (route/view->fragment :image)]]}))
      (rf/reg-event-db :image/preset (fn [db [_ id]] (db/apply-preset db id)))
      (rf/reg-event-fx :image/choose-model
                       (fn [{:keys [db]} [_ id]]

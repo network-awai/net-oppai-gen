@@ -1,0 +1,69 @@
+(ns producer-io
+  "Operator-owned free-preview client. kbb SCI host adapter; no paid fallback."
+  (:require ["fs" :as fs] ["path" :as path] ["child_process" :as cp]))
+
+(def user-agent "OppaiProducer/1.0 (+https://oppai.fans/#producer)")
+(defn read-json [p] (js->clj (js/JSON.parse (fs/readFileSync p "utf8")) :keywordize-keys true))
+(defn save! [p value]
+  (fs/writeFileSync (str p ".tmp") (js/JSON.stringify (clj->js value) nil 2) #js {:mode 384})
+  (fs/renameSync (str p ".tmp") p))
+
+(defn request! [method endpoint body output]
+  ;; Identify the operator honestly. Default Python-urllib is rejected by BIC.
+  ;; Never impersonate a browser, retry POST, or change the destination.
+  (js/parseInt
+   (cp/execFileSync "curl"
+    (clj->js (cond-> ["--silent" "--show-error" "--max-time" "150"
+                     "--connect-timeout" "15" "--proto" "=https"
+                     "--user-agent" user-agent "--header" "Accept: application/json"
+                     "--output" output "--write-out" "%{http_code}"
+                     "--request" method (str "https://oppai.fans" endpoint)]
+               body (into ["--header" "Content-Type: application/json" "--data-binary" "@-"])))
+    #js {:encoding "utf8" :input (when body (js/JSON.stringify (clj->js body)))
+         :timeout 155000}) 10))
+
+(defn valid-request? [r]
+  (and (#{"waiREALMIX_v11" "animagine-xl-4.0"} (:model r))
+       (string? (:prompt r)) (<= 1 (count (:prompt r)) 2000)
+       (= "public-examples-v1" (:publication_consent r))))
+
+(defn run! [root hour request transport]
+  (when-not (and (re-matches #"\d{8}T\d{2}Z" hour) (valid-request? request))
+    (throw (js/Error. "Invalid hour or free request")))
+  (fs/mkdirSync root #js {:recursive true :mode 448})
+  (let [lock (path/join root "run.lock")]
+    ;; Atomic cross-process lock. A crash leaves it for explicit inspection.
+    (fs/mkdirSync lock)
+    (try
+      (let [dir (path/join root hour) receipt (path/join dir "receipt.json")
+            pending (some (fn [name]
+                            (let [p (path/join root name "receipt.json")]
+                              (when (and (fs/existsSync p)
+                                         (#{"submitting" "generated" "uncertain"} (:state (read-json p)))) p)))
+                          (js->clj (fs/readdirSync root)))]
+        (cond
+          (fs/existsSync receipt) (assoc (read-json receipt) :receipt receipt)
+          pending {:state "pending" :receipt pending}
+          :else
+          (do
+            (fs/mkdirSync dir #js {:mode 448})
+            (save! (path/join dir "request.json") request)
+            (let [health (transport "GET" "/api/health" nil (path/join dir "health.json"))]
+              (if-not (= 200 health)
+                (save! receipt {:state "skipped" :reason "health_failed" :status health})
+                (do
+                  (save! receipt {:state "submitting" :hour hour})
+                  (try
+                    (let [out (path/join dir "response.json")
+                          status (transport "POST" "/api/free/image" request out)
+                          result (read-json out)]
+                      (save! receipt
+                        (cond
+                          (and (= 200 status) (= 0 (:price result)) (string? (:image result)))
+                          {:state "generated" :hour hour :response out :price 0 :model (:model result)}
+                          (#{400 429} status) {:state "skipped" :status status :reason "admission_rejected"}
+                          :else {:state "uncertain" :status status :reason "inspect_response_before_retry"})))
+                    (catch :default _
+                      (save! receipt {:state "uncertain" :reason "inspect_response_before_retry"}))))))
+            (assoc (read-json receipt) :receipt receipt))))
+      (finally (fs/rmdirSync lock)))))

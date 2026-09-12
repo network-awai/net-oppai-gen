@@ -237,6 +237,14 @@
       (assoc-in [:image :free?] (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} (str model-id)))
       (assoc :tab :image)))
 
+(defn producer-brief [db brief-id]
+  (if-let [brief (some #(when (= brief-id (:id %)) %) (:briefs catalog/producer))]
+    (-> (choose-model db (:model brief))
+        (update :image merge {:prompt (:prompt brief) :negative "" :size "768x768"
+                              :face-ref? false :publication-consent? false
+                              :status :idle :job nil :error nil}))
+    db))
+
 ;; ---- face -------------------------------------------------------------------
 
 (defn face-status [db record]
@@ -349,3 +357,14 @@
           (assoc-in [:image :job] {:job/id id :job/status :done :job/artifact-url url})
           (update :works conj {:id id :kind :image :prompt (get-in db [:image :prompt])
                                :model model :face? false :at (now-ms) :url url})))))
+
+(defn navigate-fragment [db fragment]
+  (-> (set-tab db (route/fragment->view fragment))
+      (assoc :detail-id (route/detail-id fragment))))
+
+(defn remix-work [db id]
+  (if-let [work (some #(when (= id (:id %)) %) catalog/public-works)]
+    (-> (choose-model db (:model work))
+        (update :image merge {:prompt (or (:prompt work) "") :face-ref? false
+                              :publication-consent? false :job nil :status :idle :error nil}))
+    db))

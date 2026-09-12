@@ -230,7 +230,7 @@
         q (bot/quality profile measured)
         rec (merge {:at (now-iso) :bot (:bot/id profile) :lane (:lane job) :n (:n job) :seed (:seed job)
                     :node node :model (:model job) :kind kind
-                    :prompt (:prompt job) :text (:text job)
+                    :prompt (:prompt job) :tags (:tags job) :text (:text job)
                     :path (:path fetched) :bytes (:bytes fetched) :sha256 (sha256 (:buf fetched))
                     :quality (:verdict q) :quality-reasons (:reasons q)}
                    (when w {:width w :height h})
@@ -238,6 +238,7 @@
     (append-line! (str state-dir "/receipts.edn") rec)
     (println (str "  receipt " node " " (name (:lane job)) "#" (:n job) " " (name (:verdict q))
                   " " (:bytes fetched) "B" (when w (str " " w "x" h))
+                  (when (seq (:tags job)) (str " tags=" (count (:tags job))))
                   (when (seq (:reasons q)) (str " -- " (str/join "; " (:reasons q))))))
     rec))
 
@@ -316,7 +317,8 @@
             (:txt2img :ltx-t2v)
             (let [g (bot/graph job prefix)]
               (if dry-run?
-                (do (println "  DRY" node (name lane-id) "#" n (subs (str (:prompt job)) 0 80) "…")
+                (do (println "  DRY" node (name lane-id) "#" n (subs (str (:prompt job)) 0 80) "…"
+                            (when (seq (:tags job)) (str "tags=" (count (:tags job)))))
                     (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
                 (if-let [id (comfy-submit! host g (str "oppai-studio-" node))]
                   (do (println "  queued" node (name lane-id) "#" n "->" id)

@@ -17,7 +17,8 @@
 (defn- error-banner [message]
   (when (seq (str message))
     (ui/notification {:type :error :heading "エラー" :class "oppai-error"}
-                     [:p (str message)])))
+                     [:p (str message)]
+                     [:a {:href "#feedback"} "不具合を報告する"])))
 
 #?(:cljs
    (defn fleet-note
@@ -169,7 +170,7 @@
         [:div {:class "oppai-form"}
          [:div {:class "oppai-note"}
           [:strong "基本の画像生成は無料"]
-          [:p "Animagine XL 4.0 / waiREALMIX_v11 · 768×768 · 同じネットワークから1日5回。混雑時は時間をおいてお試しください。"]]
+          [:p "Animagine XL 4.0 / waiREALMIX_v11 · 768×768 · このサイト経由で各モデル1日24回（同じネットワーク単位）。混雑時は時間をおいてお試しください。"]]
          (dds-checkbox "image-free" "無料で生成する" free? busy?
                        #(rf/dispatch [:image/set :free? (.. % -target -checked)]))
          (when free?
@@ -246,7 +247,57 @@
 ;; ---- douga ------------------------------------------------------------------
 
 #?(:cljs
-   (defn douga-studio []
+   (defn free-video-studio []
+     (let [prompt (r/atom "") consent (r/atom false) job (r/atom nil) error (r/atom nil)
+           busy? (r/atom false) request-id (r/atom nil) timer (atom nil)
+           poll! (atom nil) alive? (atom true)]
+       (reset! poll!
+               (fn [id]
+                 (when @alive?
+                   (net/poll-free-video! id
+                     {:on-ok (fn [result]
+                               (when @alive?
+                                 (reset! job result)
+                                 (if (contains? #{"done" "failed"} (:status result))
+                                   (do (reset! busy? false) (reset! request-id nil))
+                                   (reset! timer (js/setTimeout #(@poll! id) 5000)))))
+                      :on-error (fn [message] (when @alive? (reset! busy? false) (reset! error message)))}))))
+       (r/create-class
+        {:component-will-unmount (fn [_] (reset! alive? false) (when @timer (js/clearTimeout @timer)))
+         :reagent-render
+         (fn []
+           [:section {:class "oppai-form"}
+            [:h2 "10eros-max · 無料動画"]
+            [:p "寄付ノードで短い動画を生成します。512×512・39フレーム・1ネットワークにつき1日1回。混雑や処理失敗でも料金は発生しません。"]
+            [:p {:class "oppai-note"} "数分以上かかる場合があります。この画面で完了をお待ちください。動画リンクは24時間有効です。"]
+            (ui/field {:label "動画の内容" :for "free-video-prompt"}
+                      (ui/text-area {:id "free-video-prompt" :class "oppai-full" :rows 3 :max-length 2000 :value @prompt :disabled @busy?
+                                     :on-change #(do (reset! request-id nil) (reset! prompt (.. % -target -value)))}))
+            [:label [:input {:type "checkbox" :checked @consent :disabled @busy? :on-change #(reset! consent (.. % -target -checked))}]
+             " 生成結果の公開前レビューに同意します。"]
+            (ui/button (if @busy? "生成中…" "無料で動画を生成")
+                       {:variant :primary :disabled (or @busy? (not @consent) (str/blank? @prompt))}
+                       (fn [_]
+                         (reset! error nil) (reset! busy? true)
+                         (when-not @request-id (reset! request-id (.randomUUID js/crypto)))
+                         (net/submit-free-video!
+                          {:body {:model "10eros-max" :prompt @prompt :request_id @request-id :publication_consent "public-examples-v1"}
+                           :on-ok (fn [result] (when @alive? (reset! job result) (@poll! (:jobId result))))
+                           :on-error (fn [message] (when @alive? (reset! busy? false) (reset! error message)))})))
+            [:details [:summary "10eros-max の生成例を見る"]
+             [:video {:controls true :plays-inline true :preload "none" :style {:width "100%"}
+                      :poster "/img/producer-10eros-max-20260911.png" :src "/img/producer-10eros-max-20260911.mp4"}]
+             [:p {:class "oppai-note"} "実際の寄付ノードで生成したサンプル · 512×512 · 39フレーム"]]
+            (when (= "failed" (:status @job)) (error-banner "動画を完了できませんでした。料金は発生しません。"))
+            (when @error (error-banner @error))
+            (when @busy? [:p {:role "status"} "寄付ノードで受付・生成しています…"])
+            (when (= "done" (:status @job))
+              [:div [:video {:controls true :plays-inline true :style {:width "100%"}
+                            :src (str "/api/free/video/jobs/" (:jobId @job) "/artifact")}]
+               [:a {:href (str "/api/free/video/jobs/" (:jobId @job) "/artifact") :download "10eros-max.mp4"} "動画を保存"]])])}))))
+
+#?(:cljs
+   (defn paid-douga-studio []
      (let [{:keys [prompt model size frames status job error]} @(rf/subscribe [:douga])
            models @(rf/subscribe [:fleet-video-models])
            busy? (= :running status)
@@ -307,22 +358,28 @@
    (defn model-card [{:keys [id name base style tagline hint available? face-friendly?]}]
      ^{:key id}
      [:article {:class "oppai-card"}
-      [:div {:class (str "oppai-model-cover " (if (= style :anime) "is-anime" "is-photo"))}
-       [:span {:class "oppai-cover-type"} "CHECKPOINT"]
-       [:div {:class "oppai-cover-orbit" :aria-hidden "true"} "◈"]
-       [:span {:class "oppai-cover-style"} (catalog/styles style)]
-       [:small "カバーイラスト / 生成サンプルではありません"]]
+      [:a {:href (str "#model/" id) :class "oppai-model-cover is-photo"}
+       (if-let [work (first (filter #(= id (:model %)) catalog/public-works))]
+         [:img {:src (:image work) :alt (str name " の生成作例") :loading "lazy"}]
+         [:div {:class "oppai-sample-empty"} "作例準備中"])
+       [:span {:class "oppai-cover-type"} "CHECKPOINT"]]
       [:div {:class "oppai-card-body"}
        [:p {:class "oppai-card-meta"} base]
-       [:h2 {:class "oppai-card-title"} name]
+       [:h2 {:class "oppai-card-title"} [:a {:href (str "#model/" id)} name]]
        [:p {:class "oppai-card-lead"} tagline]
        [:details [:summary "モデルの使い方"]
         [:p {:class "oppai-note"} hint (when face-friendly? " 顔参照に対応。")]]
        [:div {:class "oppai-card-actions"}
         [:span {:class "oppai-note"}
-         (case available? true "● 搭載済み" false "未搭載" "搭載状況未確認")]
+         (if (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} id) "無料プレビュー" (case available? true "● 搭載済み" false "未搭載" "搭載状況未確認"))]
         (ui/button "生成する →" {:variant :primary :size "sm" :disabled (not (true? available?))}
                    #(rf/dispatch [:image/choose-model id]))]]]))
+
+#?(:cljs
+   (defn douga-studio []
+     [:div {:class "oppai-studio"}
+      [free-video-studio]
+      [:details [:summary "その他の動画モデル"] [paid-douga-studio]]]))
 
 #?(:cljs
    (defn models-view []
@@ -504,18 +561,19 @@
          "18 歳未満 — 離れる"]]]]))
 
 #?(:cljs
-   (defn public-gallery []
+   (defn public-gallery [& [producer-id model-id]]
      [:section {:class "oppai-studio oppai-public-gallery" :aria-label "公開作品"}
       [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルを確認できます。"]
-      (if (seq catalog/public-works)
+      (if (seq (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %)))) catalog/public-works))
         [:div {:class "oppai-public-grid"}
-         (for [{:keys [id title image model prompt width height]} catalog/public-works]
+         (for [{:keys [id title image model prompt width height producer]} (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %)))) catalog/public-works)]
            ^{:key id}
            [:article {:class "oppai-public-card"}
-            [:a {:href image :target "_blank" :rel "noopener"}
+            [:a {:href (str "#post/" id)}
              [:img {:src image :alt title :loading "lazy" :width (or width 832) :height (or height 1216)}]]
             [:div {:class "oppai-card-body"}
-             [:h2 title] [:p {:class "oppai-note"} model]
+             [:h2 [:a {:href (str "#post/" id)} title]] [:a {:class "oppai-note" :href (str "#model/" model)} model]
+             (when producer [:a {:href "#producer" :class "oppai-note"} "✦ Producer · BOT"])
              (when prompt [:details [:summary "プロンプトを見る"] [:p prompt]])
              (ui/button "このモデルを使う" {:size "sm" :variant :primary}
                         #(rf/dispatch [:image/choose-model model]))]])]
@@ -523,6 +581,25 @@
          [:h2 "公開作品は準備中です"]
          [:p "生成が完了した作品から、こちらに掲載します。"]
          (ui/button "画像を作成" {:href "#image" :variant :primary})])]))
+
+#?(:cljs
+   (defn producer-view []
+     [:section {:class "oppai-producer" :aria-label "Producer プロフィール"}
+      [:div {:class "oppai-producer-cover"} [:span "ORIGINAL CHARACTERS & PORTRAITS"]]
+      [:div {:class "oppai-producer-identity"}
+       [:div {:class "oppai-producer-avatar" :aria-hidden "true"} "P"]
+       [:div [:h2 "Producer " [:small {:class "oppai-note"} "BOT"]]
+        [:p {:class "oppai-note"} "@producer · AI Image Producer"]]]
+      [:p (:bio catalog/producer)]
+      [:p {:class "oppai-note"} "1時間ごとに新作を制作。画像を確認して公開します。無料枠や混雑状況により投稿を見送る場合があります。"]
+      [:div {:class "oppai-tools-grid"}
+       (for [{:keys [id label model description]} (:briefs catalog/producer)]
+         ^{:key id} [:article {:class "oppai-tool-card"}
+                    [:h3 label] [:p description] [:p {:class "oppai-note"} model]
+                    (ui/button "この企画で作成" {:variant :primary}
+                               #(rf/dispatch [:producer/brief id]))])]
+      [:h2 "Producer の作品"]
+      [public-gallery "producer"]]))
 
 #?(:cljs
    (defn tools-view []
@@ -535,6 +612,116 @@
          ^{:key url} [:a {:href url :class "oppai-tool-card"}
                      [:span {:aria-hidden "true"} icon]
                      [:h2 title] [:p description] [:strong "開く →"]])]]))
+
+#?(:cljs
+   (defn section-heading [title href]
+     [:div {:class "oppai-section-heading"} [:h2 title] [:a {:href href} "もっと見る ›"]]))
+
+#?(:cljs
+   (defn home-view []
+     [:div {:class "oppai-discovery"}
+      [:div {:class "oppai-discovery-intro"}
+       [:div [:p {:class "oppai-eyebrow"} "CREATE YOUR NEXT CHARACTER"]
+        [:h2 "ひらめきを、次の一枚に。"]
+        [:p "キャラクターも、ポートレートも。無料でつくろう。"]
+        (ui/button "画像を作成" {:href "#image" :variant :primary})]
+       [:img {:src "/img/producer-character-20260911.png" :alt "Producer のキャラクター作例"}]]
+      [section-heading "AIツール" "#tools"]
+      [:div {:class "oppai-quick-tools"}
+       (for [[href title image] [["#image" "画像作成" "/img/producer-character-20260911.png"]
+                                 ["#producer" "キャラクター企画" "/img/producer-portrait-20260911.png"]
+                                 ["#douga" "画像から動画" "/img/free-garden.png"]]]
+         ^{:key href} [:a {:href href} [:img {:src image :alt "" :loading "lazy"}] [:strong title]])]
+      [section-heading "モデル" "#models"]
+      [:div {:class "oppai-cards"}
+       (for [c (filter #(contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} (:id %)) catalog/cards)] ^{:key (:id c)} [model-card (assoc c :available? true)])]
+      [section-heading "新着作品" "#posts"]
+      [public-gallery]]))
+
+#?(:cljs
+   (defn posts-view []
+     (let [selected (r/atom nil)]
+       (fn []
+         [:div {:class "oppai-discovery"}
+          [:div {:class "oppai-filter-row"}
+           (for [[id label] [[nil "すべて"] ["animagine-xl-4.0" "アニメ"] ["waiREALMIX_v11" "写実"]]]
+             ^{:key label} [:button {:class "oppai-filter" :aria-pressed (= id @selected)
+                                    :on-click #(reset! selected id)} label])]
+          [public-gallery nil @selected]]))))
+
+#?(:cljs
+   (defn post-detail-view []
+     (let [id @(rf/subscribe [:detail-id])
+           work (some #(when (= id (:id %)) %) catalog/public-works)]
+       (if-not work
+         [:div {:class "oppai-empty"} [:h2 "作品が見つかりません"] [:a {:href "#posts"} "投稿一覧へ"]]
+         [:article {:class "oppai-detail"}
+          [:img {:class "oppai-detail-image" :src (:image work) :alt (:title work)}]
+          [:div {:class "oppai-detail-info"}
+           [:a {:href "#posts"} "‹ 投稿一覧"]
+           [:h2 (:title work)]
+           [:p (if (:producer work) [:a {:href "#producer"} "✦ Producer · BOT"] "oppai.fans Studio")]
+           [:p {:class "oppai-note"} "AI生成作品 · 768 × 768"]
+           (when (seq (:tags work))
+             [:div {:class "oppai-work-tags" :aria-label "制作タグ"}
+              (for [tag (:tags work)] ^{:key tag} [:span tag])])
+           [:h3 "使用モデル"] [:a {:href (str "#model/" (:model work))} (:model work)]
+           (when (:prompt work) [:div [:h3 "制作プロンプト"] [:p {:class "oppai-prompt-copy"} (:prompt work)]])
+           (ui/button (if (:prompt work) "このプロンプトで作成" "このモデルで作成")
+                      {:variant :primary} #(rf/dispatch [:work/remix id]))
+           [:p {:class "oppai-note"} "生成結果は毎回異なります。"]
+           [:a {:href (:image work) :download (str id ".png")} "画像をダウンロード ↓"]]]))))
+
+#?(:cljs
+   (defn model-detail-view []
+     (let [id @(rf/subscribe [:detail-id]) card (catalog/card-by-id id)
+           live @(rf/subscribe [:fleet-image-models])
+           free? (contains? #{"animagine-xl-4.0" "waiREALMIX_v11"} id)
+           available? (or free? (some #(= id (:model-id %)) live))]
+       (if-not card
+         [:div {:class "oppai-empty"} [:h2 "モデルが見つかりません"] [:a {:href "#models"} "モデル一覧へ"]]
+         [:div {:class "oppai-discovery"}
+          [:a {:href "#models"} "‹ モデル一覧"]
+          [:div {:class "oppai-model-description"}
+           [:p {:class "oppai-note"} (str "CHECKPOINT · " (:base card) " · " (catalog/styles (:style card)))]
+           [:h2 (:name card)] [:p (:tagline card)] [:p (:hint card)]
+           (when free? [:p "無料プレビュー対応 · 768×768"])
+           (ui/button (if free? "無料で生成" "このモデルで生成")
+                      {:variant :primary :disabled (not available?)}
+                      #(rf/dispatch [:image/choose-model id]))]
+          [:h2 "このモデルの作品"] [public-gallery nil id]]))))
+
+#?(:cljs
+   (defn feedback-view []
+     (let [form (r/atom {:category "bug" :message "" :page "#image" :error_id ""})
+           busy? (r/atom false) result (r/atom nil) error (r/atom nil)]
+       (fn []
+         [:section {:class "oppai-studio"}
+          [:h2 "ご意見・不具合・コメント"]
+          [:p "初回なのに無料枠が使えない場合など、こちらからお知らせください。運営が定期的に確認します。"]
+          [:p {:class "oppai-note"} "送信内容は運営のみが確認します（90日保存）。個人情報やパスワードは入力しないでください。エラー記録は30日保存します。"]
+          [:form {:class "oppai-form" :on-submit (fn [event]
+                              (.preventDefault event)
+                              (reset! busy? true) (reset! error nil) (reset! result nil)
+                              (net/submit-feedback!
+                               {:body @form
+                                :on-ok (fn [body] (reset! busy? false) (reset! result (:id body)) (swap! form assoc :message ""))
+                                :on-error (fn [message] (reset! busy? false) (reset! error message))}))}
+           (ui/field {:label "種類" :for "feedback-category"}
+                     (ui/select {:id "feedback-category" :class "oppai-full" :value (:category @form) :on-change #(swap! form assoc :category (.. % -target -value))}
+                                [["bug" "不具合"] ["idea" "改善要望"] ["comment" "コメント"]]))
+           (ui/field {:label "内容" :for "feedback-message"}
+                     (ui/text-area {:class "oppai-full" :id "feedback-message" :required true :max-length 2000 :rows 6 :value (:message @form)
+                                 :on-change #(swap! form assoc :message (.. % -target -value))}))
+           (ui/field {:label "画面" :for "feedback-page"}
+                     (ui/select {:id "feedback-page" :class "oppai-full" :value (:page @form) :on-change #(swap! form assoc :page (.. % -target -value))}
+                                [["#image" "画像生成"] ["#models" "モデル"] ["#posts" "投稿"] ["#home" "その他"]]))
+           (ui/field {:label "エラー番号（任意）" :for "feedback-error"}
+                     (ui/text-input {:class "oppai-full" :id "feedback-error" :max-length 36 :value (:error_id @form)
+                              :on-change #(swap! form assoc :error_id (.. % -target -value))}))
+           (ui/button (if @busy? "送信中…" "送信する") {:type "submit" :disabled @busy?})]
+          (when @error [:p {:role "alert"} @error])
+          (when @result [:p {:role "status"} (str "受け付けました。ありがとうございます。受付番号: " @result)])]))))
 
 #?(:cljs
    (defn payments-view []
@@ -572,7 +759,7 @@
      (if-not @(rf/subscribe [:age-confirmed?])
        [age-gate]
        (let [tab @(rf/subscribe [:tab])
-             active (if (contains? #{:image :douga :face :chat} tab) :tools tab)]
+             active (case tab :model-detail :models :post-detail :posts (if (contains? #{:image :douga :face :chat} tab) :tools tab))]
          [:div {:class "oppai-shell"}
           [:header {:class "oppai-header"}
            [:details {:class "oppai-mobile-menu"
@@ -596,11 +783,11 @@
             [:a {:href "https://murakumo.cloud"} "murakumo.cloud ↗"]]]
           [:main {:class "oppai-home" :id "main-content"}
            [:div {:class "oppai-page-heading"}
-            [:h1 (case tab :home "ホーム" :posts "投稿" :tools "AIツール" :payments "決済"
-                        :models "モデル" :image "画像作成" :douga "動画作成"
+            [:h1 (case tab :feedback "ご意見・不具合" :home "ホーム" :producer "Producer" :posts "投稿" :tools "AIツール" :payments "決済"
+                        :model-detail "モデル詳細" :post-detail "作品詳細" :models "モデル" :image "画像作成" :douga "動画作成"
                         :face "自分の顔" :works "ライブラリ" "チャット")]]
            [:div {:class "oppai-main"}
-            (case tab :payments [payments-view] :home [public-gallery] :posts [public-gallery] :tools [tools-view]
+            (case tab :feedback [feedback-view] :producer [producer-view] :payments [payments-view] :home [home-view] :posts [posts-view] :model-detail [model-detail-view] :post-detail [post-detail-view] :tools [tools-view]
                   :image [image-studio] :douga [douga-studio] :face [face-view]
                   :models [models-view] :works [works-view] [chat-studio])]]
-          [:footer {:class "oppai-footer"} [:p "© 2026 oppai.fans"]]]))))
+          [:footer {:class "oppai-footer"} [:p "© 2026 oppai.fans"] [:nav {:aria-label "サイトリンク"} [:a {:href "#models"} "モデル"] " · " [:a {:href "#posts"} "投稿"] " · " [:a {:href "#producer"} "Producer"] " · " [:a {:href "#tools"} "AIツール"]]]]))))

@@ -234,3 +234,56 @@ or login change was needed.
 - Public sample SHA256 matches the reviewed image above.
 - Frontend: 69 tests / 389 assertions passed; both builds passed. Upstream
   free Preview and signed-credit integration tests passed on deployed main.
+
+
+### Producer bot
+
+`#producer` is the public AI producer profile with character and portrait
+briefs, free model selection, and a portfolio filtered by `:producer "producer"`.
+Starting a brief clears face-reference state and asks for fresh publication
+consent. Generated samples are explicitly reviewed and credited to Producer.
+The first two works were generated through `/api/free/image` at price 0
+(45.996 seconds / 99.418 seconds) and reviewed before publication.
+
+A Codex hourly automation is active to generate, review and publish at most
+one new work per run. The user explicitly authorized recurring commit, push
+and deployment. It uses only free capacity and skips when unavailable.
+This runs through Codex; the separate Itonami bot enrollment still requires
+the owner's passkey sign-in.
+
+### Discovery and detail navigation
+
+The default home now separates tools, models and recent posts. Post pages at
+`#post/<id>` link to their exact model at `#model/<id>` and to Producer.
+Only the two operator-owned Producer sample prompts are published for remix;
+private user prompts are never added to the public catalog. Remix requires
+fresh publication consent and clears face references. Model covers use exact
+checkpoint samples; models without samples are labeled accordingly. Posts
+support anime/realistic filters. Hash navigation preserves browser history.
+
+
+### Tag-guided Producer collection
+
+The 2026-09-11 collection combines original adult, clothed character briefs
+with descriptive tags. References: [TensorHub character categories](https://tensorhub.art/channels/107),
+[Danbooru portrait](https://shima.donmai.us/wiki_pages/portrait),
+[long hair](https://shima.donmai.us/wiki_pages/long_hair), and
+[kimono](https://shima.donmai.us/wiki_pages/kimono). Civitai was inaccessible
+and is not claimed as a verified source. No third-party image or full prompt
+was imported. Tags describe the production brief, not automatically verified
+image contents. Operator-owned prompts can be reused from post details.
+
+Six images were generated and visually reviewed before publication: three
+Animagine and three WAI, each with price 0. Generation time ranged from
+54.604 to 105.810 seconds. Both model quotas returned remaining=0.
+
+
+### Sponsored free quota
+
+oppai.fans uses the server-only OPPAI_PREVIEW_SPONSOR_TOKEN to receive
+24 image requests per model/network/UTC-day from Murakumo Preview.
+The ordinary anonymous allowance remains 5. The provider retains its
+100/day per-model shared capacity and single-model concurrency lease.
+No payment token is used and no client-supplied sponsor header is forwarded.
+The hourly Producer automation is authorized to commit, push and deploy
+reviewed works; it skips when free capacity is unavailable.

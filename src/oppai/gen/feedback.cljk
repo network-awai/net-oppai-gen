@@ -1,0 +1,88 @@
+(ns oppai.gen.feedback
+  "Private, bounded support inbox. Never store request bodies, prompts, IPs or credentials in error logs."
+  (:require [goog.object :as gobj]
+            [kotoba.lang.text :as str]))
+
+(defn statement [env sql & args]
+  (let [prepared (.prepare (gobj/get env "OPPAI_DB") sql)]
+    (.apply (.-bind prepared) prepared (to-array args))))
+
+(defn json-response [body status]
+  (js/Response. (js/JSON.stringify (clj->js body))
+                #js {:status status :headers #js {"content-type" "application/json" "cache-control" "no-store"}}))
+
+(defn network-id! [request env]
+  (let [ip (.get (.-headers request) "cf-connecting-ip")
+        secret (gobj/get env "OPPAI_PREVIEW_SPONSOR_TOKEN")]
+    (if (or (str/blank? ip) (str/blank? secret))
+      (js/Promise.reject (js/Error. "Network verification unavailable"))
+      (-> (.digest (.-subtle js/crypto) "SHA-256"
+                   (.encode (js/TextEncoder.) (str secret ":oppai-network-v1:" (js/Math.floor (/ (js/Date.now) 86400000)) ":" ip)))
+          (.then (fn [buffer] (apply str (map #(.padStart (.toString % 16) 2 "0") (js/Array.from (js/Uint8Array. buffer))))))))))
+
+(defn bounded-json! [request]
+  (let [reader (.getReader (.-body request)) total (atom 0) chunks (atom [])]
+    (letfn [(read! []
+              (-> (.read reader)
+                  (.then (fn [part]
+                           (if (.-done part)
+                             (-> (.text (js/Blob. (clj->js @chunks))) (.then #(js/JSON.parse %)))
+                             (do (swap! total + (.-byteLength (.-value part)))
+                                 (if (> @total 8192)
+                                   (do (.cancel reader) (throw (js/Error. "Body too large")))
+                                   (do (swap! chunks conj (.-value part)) (read!)))))))))]
+      (read!))))
+
+(defn cleanup! [env]
+  (.batch (gobj/get env "OPPAI_DB")
+          #js [(statement env "DELETE FROM site_errors WHERE created_at < ?" (- (js/Date.now) (* 30 86400000)))
+               (statement env "DELETE FROM feedback WHERE created_at < ?" (- (js/Date.now) (* 90 86400000)))
+               (statement env "DELETE FROM feedback_limits WHERE expires_at < ?" (js/Date.now))]))
+
+(defn submit! [request env]
+  (-> (bounded-json! request)
+      (.then (fn [raw]
+               (let [message (gobj/get raw "message") category (gobj/get raw "category")
+                     page (gobj/get raw "page") error-id (gobj/get raw "error_id")]
+                 (if-not (and (string? message) (<= 1 (count (str/trim message)) 2000)
+                              (contains? #{"bug" "idea" "comment"} category)
+                              (string? page) (boolean (re-matches #"#[A-Za-z0-9/_-]{0,160}" page))
+                              (or (nil? error-id) (= "" error-id) (and (string? error-id) (boolean (re-matches #"[a-f0-9-]{36}" error-id)))))
+                   (json-response {:error {:message "内容は1〜2000文字で入力してください。"}} 400)
+                   (-> (network-id! request env)
+                       (.then (fn [network]
+                                (.first (statement env
+                                  "INSERT INTO feedback_limits(bucket,used,expires_at) VALUES (?,1,?) ON CONFLICT(bucket) DO UPDATE SET used=used+1 WHERE used<10 RETURNING used"
+                                  (str (js/Math.floor (/ (js/Date.now) 86400000)) ":" network) (+ (js/Date.now) 172800000)))))
+                       (.then (fn [quota]
+                                (if-not quota (json-response {:error {:message "本日の送信上限です。明日お試しください。"}} 429)
+                                  (let [id (.randomUUID js/crypto)]
+                                    (-> (.run (statement env "INSERT INTO feedback(id,created_at,category,message,page,error_id) SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM feedback)<10000" id (js/Date.now) category (str/trim message) page error-id))
+                                        (.then (fn [result]
+                                                 (if (= 1 (gobj/getValueByKeys result "meta" "changes"))
+                                                   (json-response {:ok true :id id} 201)
+                                                   (json-response {:error {:message "受付が混雑しています。時間をおいてお試しください。"}} 503))))))))))))))
+      (.catch (fn [_] (json-response {:error {:message "送信できませんでした。入力を確認し、時間をおいて再試行してください。"}} 503)))))
+
+(defn observe! [request env ctx response]
+  (if (or (< (.-status response) 400) (not (str/starts-with? (.-pathname (js/URL. (.-url request))) "/api/")))
+    response
+    (let [id (.randomUUID js/crypto) status (.-status response)
+          path (.-pathname (js/URL. (.-url request)))
+          route (if (str/starts-with? path "/api/free/video") "/api/free/video" (if (contains? #{"/api/free/image" "/api/chat" "/api/generation" "/api/feedback" "/api/image-models"} path) path "/api/other"))]
+      (-> (.json (.clone response))
+          (.catch (fn [_] #js {}))
+          (.then (fn [body]
+                   (let [raw-code (or (gobj/getValueByKeys body "error" "code") (gobj/getValueByKeys body "error" "type"))
+                         code (if (and (string? raw-code) (re-matches #"[a-z_]{1,64}" raw-code)) raw-code "request_failed")
+                         persist (-> (js/Promise.resolve nil)
+                                     (.then (fn [_] (.run (statement env "INSERT INTO site_errors(id,created_at,route,code,status) SELECT ?,?,?,?,? WHERE (SELECT count(*) FROM site_errors)<10000" id (js/Date.now) route code status))))
+                                     (.catch (fn [_] (.error js/console "support_log_unavailable" id code status))))
+                         headers (js/Headers. (.-headers response))]
+                     (.waitUntil ctx persist)
+                     (.set headers "x-request-id" id)
+                     (.set headers "content-type" "application/json")
+                     (.set headers "cache-control" "no-store")
+                     (.delete headers "content-length")
+                     (gobj/set body "request_id" id)
+                     (js/Response. (js/JSON.stringify body) #js {:status status :headers headers}))))))))

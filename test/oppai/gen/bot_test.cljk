@@ -63,7 +63,13 @@
     (is (not (guard/minor? text)) (str lane-id " n=" n ": " text))
     (is (nil? (bot/forbidden-hit (get-in profile [:bot/policy :forbidden]) text)) (str lane-id " n=" n ": " text))
     (when (:prompt job)
-      (is (bot/adult-marked? profile text) (str lane-id " n=" n " carries no adult marker: " text)))))
+      (is (bot/adult-marked? profile text) (str lane-id " n=" n " carries no adult marker: " text)))
+    ;; the tags ride on the same receipt as the prompt; they get the same boundary
+    (when (seq (:tags job))
+      (let [t (str/join ", " (:tags job))]
+        (is (not (guard/minor? t)) (str lane-id " n=" n " tags: " t))
+        (is (nil? (bot/forbidden-hit (get-in profile [:bot/policy :forbidden]) t)) (str lane-id " n=" n " tags: " t))
+        (is (bot/adult-marked? profile t) (str lane-id " n=" n " tags name no adult: " t))))))
 
 (deftest composed-image-jobs-are-the-shape-the-guard-accepts
   (doseq [lane-id [:real-mix :real-cn :anime]
@@ -107,6 +113,65 @@
   ;; not depend on the first having been called.
   (let [poisoned (assoc-in profile [:bot/banks :scene] [{:tags "classroom, desks" :natural "in a classroom"}])]
     (is (thrown? js/Error (bot/compose poisoned :anime 0)))))
+
+;; ---- tags on composed jobs --------------------------------------------------------
+
+(deftest every-image-bank-entry-carries-a-non-blank-tag-form
+  ;; a bank entry without :tags would leave its works silently untagged, so
+  ;; the shipped profile is pinned: all seven image banks tag every entry.
+  ;; (:voice-lines is prose, not tags, and is deliberately not listed.)
+  (doseq [bank [:body :look :outfit :act :expression :scene :camera]]
+    (doseq [e (get-in profile [:bot/banks bank])]
+      (is (seq (:tags e)) (str bank " entry carries no :tags: " (pr-str e))))))
+
+(deftest composed-jobs-carry-tags-from-the-same-picks
+  (doseq [lane-id [:real-mix :real-cn :anime :video-ltx :eros-h3]
+          n [0 1 7 13]
+          :let [job (bot/compose profile lane-id n)
+                tags (:tags job)]]
+    (is (vector? tags) (str lane-id " n=" n " has no tags"))
+    (is (seq (remove str/blank? tags)) (str lane-id " n=" n " tags are empty"))
+    (let [joined (str/join ", " tags)]
+      (is (bot/adult-marked? profile joined) (str lane-id " n=" n " tags name no adult: " joined))
+      (is (nil? (bot/forbidden-hit (get-in profile [:bot/policy :forbidden]) joined))
+          (str lane-id " n=" n " tags hit a forbidden term: " joined)))))
+
+(deftest tags-come-from-the-prompt-s-picks
+  (testing "a :tags lane's prompt is built from its tags"
+    (let [job (bot/compose profile :anime 4)]
+      (doseq [tag (:tags job)]
+        (is (str/includes? (:prompt job) tag) (str "tag missing from the prompt: " tag)))))
+  (testing "a :natural lane's tags name the same content without copying the prompt"
+    (let [job (bot/compose profile :real-mix 0)]
+      (is (some #(not (str/includes? (:prompt job) %)) (:tags job))
+          "natural-lane tags must not be the prompt's own sentences"))))
+
+(deftest compose-refuses-when-the-tags-fail-the-boundary-even-with-a-clean-prompt
+  ;; the tags are published content; they are checked like a prompt, and the
+  ;; check must not depend on validate-profile having run first.
+  (let [all-forced (update-in profile [:bot/banks :expression]
+                              (fn [es] (mapv #(assoc % :tags "forced, crying") es)))]
+    (is (thrown-with-msg? js/Error #"composed tags fail the boundary"
+                          (bot/compose all-forced :real-mix 0))
+        "forbidden :tags with a clean :natural prompt"))
+  (let [all-loli (update-in profile [:bot/banks :look]
+                            (fn [es] (mapv #(assoc % :tags "loli, small") es)))]
+    (is (thrown-with-msg? js/Error #"composed tags fail the boundary"
+                          (bot/compose all-loli :real-mix 0))
+        "minor-term :tags are rejected by the guard even though the natural prompt
+         is clean (on a :tags lane the tags are the prompt, so the prompt check
+         fires first)"))
+  (testing "the markerless refusal is not a tautology: compose leads tags with the
+            adult pick, so the refusal fires only if that lead ever disappears"
+    (is (false? (bot/adult-marked? profile "soft light, window light")))))
+
+(deftest voice-and-svd-jobs-carry-no-tags
+  (is (nil? (:tags (bot/compose profile :voice 0))) "voice lines have no tag forms")
+  (let [p (update profile :bot/lanes conj {:lane/id :video-svd :lane/kind :svd-i2v :lane/model "svd_xt"
+                                           :lane/checkpoint "svd_xt.safetensors" :lane/nodes ["hypothetical"]
+                                           :lane/source-lanes [:real-mix] :lane/seconds 2 :lane/fps 12
+                                           :lane/width 576 :lane/height 1024 :lane/steps 20})]
+    (is (nil? (:tags (bot/compose p :video-svd 0))) "svd supplies its own image, no prompt, no tags")))
 
 ;; ---- placement ------------------------------------------------------------------
 

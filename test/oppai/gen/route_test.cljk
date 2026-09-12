@@ -16,3 +16,9 @@
   (is (= (route/view->fragment route/default-view) (route/view->fragment :nope)))
   (is (route/view? :models))
   (is (not (route/view? :nope))))
+
+(deftest detail-links-roundtrip
+  (is (= :post-detail (route/fragment->view "#post/producer-character-20260911")))
+  (is (= "producer-character-20260911" (route/detail-id "#post/producer-character-20260911")))
+  (is (= :model-detail (route/fragment->view "#model/waiREALMIX_v11")))
+  (is (nil? (route/detail-id "#home"))))
