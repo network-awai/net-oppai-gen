@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // oppai.fans. Build: npm run build (generates public/index.html from
-  // oppai.gen.site, then amu compile --target wasm32-browser app worker -> public/assets/main.js
+  // oppai.gen.site, then shadow-cljs release app worker -> public/assets/main.js
   // + dist/worker.js). Deploy: npm run deploy.
   //
   // The Worker owns /api/*; everything else falls through to the static
