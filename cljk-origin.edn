@@ -3,7 +3,11 @@
  :decision "adr-2609111500-cljk-rename-all-clojure-source (com-junkawasaki/root 90-docs/adr; owner instruction 2026-09-11)"
  :rule "value = the extension the file had before the rename. A path ending in .clj.cljk or .cljs.cljk kept it in the name because both platform files existed (or the plain target was taken)."
  :origins
- {"test/producer_profiles_test.cljk" ".cljs"
+ {"test/producer_publish_test.cljk" ".cljs"
+  "scripts/producer_publish.cljk" ".cljs"
+  "scripts/producer_deploy.cljk" ".cljs"
+  "scripts/producer_mcp.cljk" ".cljs"
+  "test/producer_profiles_test.cljk" ".cljs"
   "src/oppai/gen/producer_profiles.cljk" ".cljc"
   "scripts/producer_io.cljk" ".cljs"
   "scripts/producer_tick.cljk" ".cljs"

@@ -1,0 +1,33 @@
+(ns producer-publish-test
+  (:require [producer-publish :as p] [cljs.test :as t :refer [deftest is run-tests]]
+            ["child_process" :as cp]))
+(def bytes (js/Buffer.alloc 24))
+(.copy (js/Buffer.from "89504e470d0a1a0a" "hex") bytes)
+(.writeUInt32BE bytes 768 16)
+(.writeUInt32BE bytes 768 20)
+(def digest (p/sha bytes))
+(def receipt {:state "generated" :reviewed true :price 0 :model "waiREALMIX_v11"
+              :title "Reviewed portrait" :sha256 digest :profile "tag-fantasy"})
+(def response {:price 0 :model "waiREALMIX_v11" :image (str "data:image/png;base64," (.toString bytes "base64"))})
+(def request {:model "waiREALMIX_v11" :publication_consent "public-examples-v1" :prompt "Adult portrait"})
+(deftest validation
+  (is (= "tag-fantasy" (get-in (p/prepare-data "20260912T06Z" digest receipt response request) [:work :profile])))
+  (doseq [r [(assoc receipt :reviewed false) (assoc receipt :profile "unknown")
+             (assoc receipt :state "uncertain") (assoc receipt :title "")]]
+    (is (thrown? js/Error (p/prepare-data "20260912T06Z" digest r response request))))
+  (is (thrown? js/Error (p/prepare-data "20260912T06Z" "wrong" receipt response request)))
+  (is (thrown? js/Error (p/prepare-data "20260912T06Z" digest receipt (assoc response :price 1) request)))
+  (is (thrown? js/Error (p/receipt-path "../../secrets"))))
+(deftest stdio-roundtrip
+  (let [input (str "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\"}\n"
+                   "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n"
+                   "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n")
+        out (cp/execFileSync "kbb" #js ["--backend" "sci" "--classpath" "scripts:src" "scripts/producer_mcp.cljk"]
+                            #js {:input input :encoding "utf8"})
+        lines (.split (.trim out) "\n")]
+    (is (= 2 (count lines)))
+    (is (= "producer_publish" (get-in (js->clj (js/JSON.parse (aget lines 1)) :keywordize-keys true)
+                                          [:result :tools 1 :name])))))
+(defmethod t/report [:cljs.test/default :end-run-tests] [m]
+  (set! (.-exitCode js/process) (if (t/successful? m) 0 1)))
+(run-tests)

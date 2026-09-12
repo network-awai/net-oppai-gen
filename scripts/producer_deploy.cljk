@@ -1,0 +1,10 @@
+(ns producer-deploy (:require [producer-publish :as p]))
+(let [[expected commit] *command-line-args*
+      repo (.cwd js/process)
+      ds (js->clj (js/JSON.parse (p/command repo ["npx" "wrangler" "deployments" "list" "--json"])) :keywordize-keys true)
+      latest (last (sort-by :created_on ds))]
+  (when-not (and (= commit (.trim (p/command repo ["git" "rev-parse" "HEAD"])))
+                 (= "" (.trim (p/command repo ["git" "status" "--porcelain"])))
+                 (= [{:version_id expected :percentage 100}] (:versions latest)))
+    (throw (js/Error. "Deployment changed; inspect before retry")))
+  (.write (.-stderr js/process) (p/command repo ["npx" "wrangler" "deploy"])))

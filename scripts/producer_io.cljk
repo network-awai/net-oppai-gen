@@ -39,7 +39,7 @@
             pending (some (fn [name]
                             (let [p (path/join root name "receipt.json")]
                               (when (and (fs/existsSync p)
-                                         (#{"submitting" "generated" "uncertain"} (:state (read-json p)))) p)))
+                                         (#{"submitting" "generated" "deployed" "uncertain"} (:state (read-json p)))) p)))
                           (js->clj (fs/readdirSync root)))]
         (cond
           (fs/existsSync receipt) (assoc (read-json receipt) :receipt receipt)
