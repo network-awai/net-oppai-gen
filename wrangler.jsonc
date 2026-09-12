@@ -36,5 +36,7 @@
   "kv_namespaces": [
     { "binding": "OPPAI_KV", "id": "0b84f6a6905644c68f60eb693d15c6b1" }
   ],
+  "d1_databases": [{"binding": "OPPAI_DB", "database_name": "oppai-feedback", "database_id": "5ade2f09-54d1-4bca-a182-1185bc39a47b", "migrations_dir": "migrations"}],
+  "triggers": {"crons": ["17 * * * *"]},
   "observability": { "enabled": true }
 }

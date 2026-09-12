@@ -34,6 +34,7 @@
   (:require [kotoba.lang.text :as str]
             [oppai.gen.guard :as guard]
             [oppai.gen.billing :as billing]
+            [oppai.gen.feedback :as feedback]
             [goog.object :as gobj]))
 
 (def ^:private chat-upstream "https://api.murakumo.cloud/v1/chat/completions")
@@ -353,7 +354,7 @@
             :upstream generation-upstream}}
    200))
 
-(defn- free-image! [request]
+(defn- free-image! [request env]
   (-> (.json request)
       (.then (fn [raw]
                (let [prompt (gobj/get raw "prompt") consent (gobj/get raw "publication_consent")
@@ -364,12 +365,41 @@
                    (error-response "invalid_request" "公開前レビューへの同意と2000文字以内のプロンプトが必要です。" 400)
                    ;; No generation token and no billing identity on the free lane.
                    ;; The upstream retains its network/day quota and concurrency gate.
-                   (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
-                             #js {:method "POST" :headers #js {"content-type" "application/json"}
+                   (-> (feedback/network-id! request env)
+                       (.then (fn [network]
+                         (js/fetch "https://murakumo.cloud/api/v1/preview/generate"
+                             #js {:method "POST" :headers (clj->js
+                                  (cond-> {"content-type" "application/json" "x-preview-network" network}
+                                    (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN")
+                                    (assoc "x-preview-sponsor" (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN"))))
                                   :signal (js/AbortSignal.timeout 120000)
                                   :body (js/JSON.stringify #js {:model profile :prompt prompt
-                                                              :publication_consent consent})})))))
+                                                              :publication_consent consent})}))))))))
       (.catch (fn [_] (error-response "free_unavailable" "無料生成を完了できませんでした。料金は発生しません。" 503)))))
+
+(defn- free-video! [request env path]
+  (let [suffix (subs path (count "/api/free/video"))]
+    (if-not (and (or (= "" suffix) (re-matches #"/jobs/[a-f0-9-]{36}(/artifact)?" suffix))
+                 (or (and (= "POST" (.-method request)) (= "" suffix)) (= "GET" (.-method request))))
+      (js/Promise.resolve (error-response "invalid_request" "動画リクエストを確認してください。" 400))
+      (-> (feedback/network-id! request env)
+          (.then (fn [network]
+                   (-> (if (= "POST" (.-method request)) (feedback/bounded-json! request) (js/Promise.resolve nil))
+                       (.then (fn [body]
+                                (js/fetch (str "https://murakumo.cloud/api/v1/preview/video" suffix)
+                                          (clj->js (cond-> {:method (.-method request)
+                                                            :headers {"content-type" "application/json"
+                                                                      "x-preview-sponsor" (env-str env "OPPAI_PREVIEW_SPONSOR_TOKEN")
+                                                                      "x-preview-network" network}}
+                                                     body (assoc :body (js/JSON.stringify body))))))))))
+          (.then (fn [res]
+                   (if (str/ends-with? suffix "/artifact") res
+                     (-> (.json res)
+                         (.then (fn [body]
+                                  (when-let [artifact (gobj/get body "artifactUrl")]
+                                    (gobj/set body "artifactUrl" (str/replace artifact #"^/api/v1/preview/video" "/api/free/video")))
+                                  (json-response (js->clj body :keywordize-keys true) (.-status res))))))))
+          (.catch (fn [_] (error-response "free_unavailable" "無料動画に接続できませんでした。料金は発生しません。" 503)))))))
 
 (defn- payment-options! []
   (-> (js/fetch billing/offer-url
@@ -388,7 +418,7 @@
 (def ^:private job-path #"^/api/generation/jobs/([A-Za-z0-9_-]{1,128})$")
 (def ^:private artifact-path #"^/api/generation/jobs/([A-Za-z0-9_-]{1,128})/artifact$")
 
-(defn fetch-handler [request env _ctx]
+(defn- handle-request [request env _ctx]
   (let [url (js/URL. (.-url request))
         path (.-pathname url)
         method (.-method request)]
@@ -400,8 +430,15 @@
       (if-not (same-origin? request)
         (error-response "forbidden_origin" "this endpoint serves oppai.fans only" 403)
         (cond
+          (= "/api/feedback" path)
+          (if (= "POST" method) (feedback/submit! request env)
+              (error-response "method_not_allowed" "POST only" 405))
+
+          (or (= "/api/free/video" path) (str/starts-with? path "/api/free/video/"))
+          (free-video! request env path)
+
           (= "/api/free/image" path)
-          (if (= "POST" method) (free-image! request)
+          (if (= "POST" method) (free-image! request env)
               (error-response "method_not_allowed" "POST only" 405))
 
           (= "/api/payments" path)
@@ -456,4 +493,11 @@
       :else
       (.fetch (gobj/get env "ASSETS") request))))
 
-(def default (clj->js {:fetch fetch-handler}))
+(defn fetch-handler [request env ctx]
+  (-> (js/Promise.resolve nil)
+      (.then (fn [_] (handle-request request env ctx)))
+      (.catch (fn [_] (error-response "internal_error" "処理を完了できませんでした。時間をおいて再試行してください。" 500)))
+      (.then (fn [response] (feedback/observe! request env ctx response)))))
+
+(def default (clj->js {:fetch fetch-handler
+                      :scheduled (fn [_ env ctx] (.waitUntil ctx (feedback/cleanup! env)))}))

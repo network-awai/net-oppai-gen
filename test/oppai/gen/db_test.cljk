@@ -237,3 +237,28 @@
     (is (true? (get-in chosen [:image :free?])))
     (is (= "waiREALMIX_v11" (get-in done [:image :model])))
     (is (= "waiREALMIX_v11" (:model (first (:works done)))))))
+
+
+(deftest producer-brief-resets-sensitive-options
+  (let [before (-> (db/initial-db)
+                   (assoc-in [:image :face-ref?] true)
+                   (assoc-in [:image :publication-consent?] true))
+        after (db/producer-brief before :portrait)]
+    (is (= :image (:tab after)))
+    (is (= "waiREALMIX_v11" (get-in after [:image :model])))
+    (is (true? (get-in after [:image :free?])))
+    (is (false? (get-in after [:image :face-ref?])))
+    (is (false? (get-in after [:image :publication-consent?])))
+    (is (= before (db/producer-brief before :unknown)))))
+
+(deftest public-work-remix-preserves-free-boundary
+  (let [before (-> (db/initial-db)
+                   (assoc-in [:image :publication-consent?] true)
+                   (assoc-in [:image :face-ref?] true))
+        after (db/remix-work before "producer-portrait-20260911")]
+    (is (= "waiREALMIX_v11" (get-in after [:image :model])))
+    (is (seq (get-in after [:image :prompt])))
+    (is (true? (get-in after [:image :free?])))
+    (is (false? (get-in after [:image :publication-consent?])))
+    (is (false? (get-in after [:image :face-ref?])))
+    (is (= before (db/remix-work before "missing")))))
