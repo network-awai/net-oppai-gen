@@ -3,6 +3,7 @@
   here runs identically on the JVM, which is what the tests drive."
   (:require [kotoba.lang.text :as str]
             [oppai.gen.catalog :as catalog]
+            [oppai.gen.producer-profiles :as profiles]
             [oppai.gen.fleet :as fleet]
             [oppai.gen.guard :as guard]
             [oppai.gen.route :as route]))
@@ -238,7 +239,9 @@
       (assoc :tab :image)))
 
 (defn producer-brief [db brief-id]
-  (if-let [brief (some #(when (= brief-id (:id %)) %) (:briefs catalog/producer))]
+  (if-let [brief (or (some #(when (= brief-id (:id %)) %) (:briefs catalog/producer))
+                         (when-let [p (profiles/by-id brief-id)]
+                           {:model "waiREALMIX_v11" :prompt (profiles/prompt p 0)}))]
     (-> (choose-model db (:model brief))
         (update :image merge {:prompt (:prompt brief) :negative "" :size "768x768"
                               :face-ref? false :publication-consent? false

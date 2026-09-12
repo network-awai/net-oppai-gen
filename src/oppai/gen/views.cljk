@@ -4,6 +4,7 @@
   `oppai.gen.ui` seam. Presentation only — state lives in re-frame."
   (:require [kotoba.lang.text :as str]
             [oppai.gen.catalog :as catalog]
+            [oppai.gen.producer-profiles :as profiles]
             [oppai.gen.db :as db]
             [oppai.gen.fleet :as fleet]
             [oppai.gen.guard :as guard]
@@ -561,12 +562,12 @@
          "18 歳未満 — 離れる"]]]]))
 
 #?(:cljs
-   (defn public-gallery [& [producer-id model-id]]
+   (defn public-gallery [& [producer-id model-id profile-id]]
      [:section {:class "oppai-studio oppai-public-gallery" :aria-label "公開作品"}
       [:p {:class "oppai-note"} "oppai.fans で生成・公開した作品。使用モデルを確認できます。"]
-      (if (seq (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %)))) catalog/public-works))
+      (if (seq (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %))) (or (nil? profile-id) (= profile-id (:profile %)))) catalog/public-works))
         [:div {:class "oppai-public-grid"}
-         (for [{:keys [id title image model prompt width height producer]} (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %)))) catalog/public-works)]
+         (for [{:keys [id title image model prompt width height producer]} (filter #(and (or (nil? producer-id) (= producer-id (:producer %))) (or (nil? model-id) (= model-id (:model %))) (or (nil? profile-id) (= profile-id (:profile %)))) catalog/public-works)]
            ^{:key id}
            [:article {:class "oppai-public-card"}
             [:a {:href (str "#post/" id)}
@@ -583,7 +584,7 @@
          (ui/button "画像を作成" {:href "#image" :variant :primary})])]))
 
 #?(:cljs
-   (defn producer-view []
+   (defn producer-overview []
      [:section {:class "oppai-producer" :aria-label "Producer プロフィール"}
       [:div {:class "oppai-producer-cover"} [:span "ORIGINAL CHARACTERS & PORTRAITS"]]
       [:div {:class "oppai-producer-identity"}
@@ -598,8 +599,34 @@
                     [:h3 label] [:p description] [:p {:class "oppai-note"} model]
                     (ui/button "この企画で作成" {:variant :primary}
                                #(rf/dispatch [:producer/brief id]))])]
+      [:h2 "キーワード別 Producer"]
+      [:p {:class "oppai-note"} (str (count profiles/profiles) " のテーマを、生成回数が少ない順に制作します。")]
+      [:div {:class "oppai-tools-grid"}
+       (for [p profiles/profiles]
+         ^{:key (:id p)}
+         [:a {:class "oppai-tool-card" :href (str "#producer/" (:id p))}
+          [:p {:class "oppai-note"} (:category p)]
+          [:h3 (:keyword p)] [:p "プロフィールを見る →"]])]
       [:h2 "Producer の作品"]
       [public-gallery "producer"]]))
+
+#?(:cljs
+   (defn producer-view []
+     (let [id @(rf/subscribe [:detail-id]) p (profiles/by-id id)]
+       (cond
+         (nil? id) [producer-overview]
+         (nil? p) [:section {:class "oppai-empty"} [:h2 "Producer が見つかりません"] [:a {:href "#producer"} "一覧へ"]]
+         :else
+         [:section {:class "oppai-producer"}
+          [:a {:href "#producer"} "‹ Producer 一覧"]
+          [:div {:class "oppai-producer-cover"} (:category p)]
+          [:h2 (:keyword p) " · Producer"]
+          [:p {:class "oppai-note"} (str "@" (:id p) " · BOT")]
+          [:p (str (:keyword p) " をテーマにした、架空の成人キャラクターや人物の作品を制作します。")]
+          [:p "他のProducerと順番に制作し、生成回数の偏りを抑えます。"]
+          (ui/button "このテーマで作成" {:variant :primary} #(rf/dispatch [:producer/brief id]))
+          [:details [:summary "制作プロンプト"] [:p (profiles/prompt p 0)]]
+          [:h3 "公開作品"] [public-gallery "producer" nil id]]))))
 
 #?(:cljs
    (defn tools-view []
@@ -660,7 +687,7 @@
           [:div {:class "oppai-detail-info"}
            [:a {:href "#posts"} "‹ 投稿一覧"]
            [:h2 (:title work)]
-           [:p (if (:producer work) [:a {:href "#producer"} "✦ Producer · BOT"] "oppai.fans Studio")]
+           [:p (if (:producer work) [:a {:href (if (:profile work) (str "#producer/" (:profile work)) "#producer")} "✦ Producer · BOT"] "oppai.fans Studio")]
            [:p {:class "oppai-note"} "AI生成作品 · 768 × 768"]
            (when (seq (:tags work))
              [:div {:class "oppai-work-tags" :aria-label "制作タグ"}

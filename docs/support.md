@@ -2,8 +2,8 @@
 
 ## Producer recovery and publication
 
-Run `kbb --backend sci --classpath scripts scripts/producer_tick.cljk request.json`
-from the checked deployment branch after reviewing the inbox. The JSON request
+Run `kbb --backend sci --classpath scripts:src scripts/producer_tick.cljk --balanced`
+from the checked deployment branch after reviewing the inbox. Use `--plan` for a read-only preview of the next profile. A request.json argument remains available for reviewed manual briefs. The JSON request
 contains `model`, a reviewed non-explicit fictional-adult `prompt`, and
 `publication_consent: "public-examples-v1"`. The client identifies itself as
 `OppaiProducer/1.0 (+https://oppai.fans/#producer)`. Cloudflare rejects the default
@@ -49,3 +49,5 @@ Verification: `npm test`, guarded `npm run build`, then `nbb test/support_worker
 `#douga` offers `10eros-max` via `/api/free/video` and `/api/free/video/jobs/:id[/artifact]`. The site forwards a server-derived network digest and sponsor credential to the capped Murakumo video preview. The video preview fixes the model and 512x512/39-frame shape, uses the existing owned donation runner, and never falls back to a hosted model or customer credits. Limit: one attempt/network/UTC day, 12 shared attempts/day, one active free-video lease. Failed/uncertain admission is not automatically retried. Request UUIDs make resubmission idempotent. Opaque job IDs are access capabilities; do not publish private job links. Links expire after 24 hours. Source prompts are not stored in support logs or preview job metadata.
 
 Reviewed operator sample: `/img/producer-10eros-max-20260911.mp4`, SHA256 `581100e3731db88353c90f9ff419f59bc229267150d46441ef912138cd1d6623`, adult fully clothed garden portrait. All three inspected frames retain adult clothing; node completed the 39-frame MP4.
+
+Balanced profiles use the reviewed data in `src/oppai/gen/producer_profiles.cljk`. Preserve `:profile` from the request/receipt in the public-works entry while retaining `:producer "producer"`. The original keyword belongs in the work tags when it describes the reviewed output. Never manufacture an image to fill an empty profile. Verify profile routing via `#producer/<profile-id>`.

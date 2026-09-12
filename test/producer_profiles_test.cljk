@@ -1,0 +1,23 @@
+(ns producer-profiles-test
+  (:require [oppai.gen.producer-profiles :as p]
+            [cljs.test :as t :refer [deftest is run-tests]]))
+(deftest balanced-rounds
+  (let [n (count p/profiles)
+        history (reduce (fn [xs i]
+                          (conj xs {:profile (:id (p/choose xs)) :state "published"
+                                    :hour (str (+ 10000 i))})) [] (range (* 3 n)))
+        counts (frequencies (map :profile history))]
+    (is (= n (count counts)))
+    (is (every? #(= 3 %) (vals counts)))
+    (is (= n (count (set (map :id p/profiles)))))))
+(deftest failed-attempt-rotates
+  (let [first-id (:id (p/choose []))]
+    (is (not= first-id (:id (p/choose [{:profile first-id :state "skipped" :hour "20260912T05Z"}]))))
+    (is (not= first-id (:id (p/choose [{:profile first-id :state "generated" :hour "20260912T05Z"}]))))))
+(deftest reviewed-briefs
+  (is (nil? (p/by-id "unknown")))
+  (is (every? #(re-find #"adult age 32, fully clothed" (p/prompt % 0)) p/profiles))
+  (is (every? #(< (count (p/prompt % 0)) 2000) p/profiles)))
+(defmethod t/report [:cljs.test/default :end-run-tests] [m]
+  (set! (.-exitCode js/process) (if (t/successful? m) 0 1)))
+(run-tests)

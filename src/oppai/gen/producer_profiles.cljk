@@ -1,0 +1,112 @@
+(ns oppai.gen.producer-profiles)
+
+;; Reviewed, non-explicit subset of tags.csv. Raw CSV is never a prompt.
+(def profiles
+  [
+   {:id "tag-2d-game" :keyword "2d-game" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-2dcg" :keyword "2dcg" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-3d-game" :keyword "3d-game" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-3d-works" :keyword "3d-works" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-3dcg" :keyword "3dcg" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-action" :keyword "action" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-adv" :keyword "adv" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-adventure" :keyword "adventure" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-ai-cg" :keyword "ai-cg" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-animated" :keyword "animated" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-animation" :keyword "animation" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-anime" :keyword "anime" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-blonde-hair" :keyword "blonde-hair" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-character-creation" :keyword "character-creation" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-clothed" :keyword "clothed" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-clothes-changing" :keyword "clothes-changing" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-clothes-changingdress-up" :keyword "clothes-changingdress-up" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-combat" :keyword "combat" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-comedy" :keyword "comedy" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-cosplay" :keyword "cosplay" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-dating-sim" :keyword "dating-sim" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-dotpixel" :keyword "dotpixel" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-dystopian-setting" :keyword "dystopian-setting" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-fantasy" :keyword "fantasy" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-female-heroine" :keyword "female-heroine" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-female-protagonist" :keyword "female-protagonist" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-flash" :keyword "flash" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-furry" :keyword "furry" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-gay" :keyword "gay" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-group" :keyword "group" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-horror" :keyword "horror" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-humor" :keyword "humor" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-interracial" :keyword "interracial" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-japanese-game" :keyword "japanese-game" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-jrpg" :keyword "jrpg" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-kinetic-novel" :keyword "kinetic-novel" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-lesbian" :keyword "lesbian" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-lovey-doveysweet-love" :keyword "lovey-doveysweet-love" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-male-hero" :keyword "male-hero" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-male-protagonist" :keyword "male-protagonist" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-management" :keyword "management" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-married-woman" :keyword "married-woman" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-mobile-game" :keyword "mobile-game" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-monster" :keyword "monster" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-monster-girl" :keyword "monster-girl" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-monsters" :keyword "monsters" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-multiple-endings" :keyword "multiple-endings" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-multiple-protagonist" :keyword "multiple-protagonist" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-no-sexual-content" :keyword "no-sexual-content" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-nonhumanmonster-girl" :keyword "nonhumanmonster-girl" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-outdoor" :keyword "outdoor" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-paranormal" :keyword "paranormal" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-parody" :keyword "parody" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-platformer" :keyword "platformer" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-point-and-click" :keyword "point-and-click" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-pure-love" :keyword "pure-love" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-puzzle" :keyword "puzzle" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-religion" :keyword "religion" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-romance" :keyword "romance" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-rpg" :keyword "rpg" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-rpg-maker" :keyword "rpg-maker" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-sandbox" :keyword "sandbox" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-sci-fi" :keyword "sci-fi" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-shooter" :keyword "shooter" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-side-scroller" :keyword "side-scroller" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-simulator" :keyword "simulator" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-slg" :keyword "slg" :category "日常" :cue "relaxed daytime portrait, cozy surroundings, warm natural light"}
+   {:id "tag-stockings" :keyword "stockings" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-straight" :keyword "straight" :category "多様な人物" :cue "friendly fictional adult characters in everyday clothing, wholesome character illustration"}
+   {:id "tag-strategy" :keyword "strategy" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-superpowers" :keyword "superpowers" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-text-based" :keyword "text-based" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-transformation" :keyword "transformation" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-turn-based-combat" :keyword "turn-based-combat" :category "世界観" :cue "original adventurer in a cinematic fictional world, atmospheric scenery"}
+   {:id "tag-twins" :keyword "twins" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+   {:id "tag-uniform" :keyword "uniform" :category "衣装" :cue "fashion lookbook, tailored jacket, opaque trousers, fully dressed"}
+   {:id "tag-virtual-reality" :keyword "virtual-reality" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-voiced" :keyword "voiced" :category "画風" :cue "illustrated character design, polished game concept art"}
+   {:id "tag-woman's-viewpoint" :keyword "woman's-viewpoint" :category "人物" :cue "original adult character portrait, expressive face, elegant everyday clothing"}
+  ])
+
+(defn by-id [id] (some #(when (= id (:id %)) %) profiles))
+(defn prompt [profile n]
+  (str "masterpiece, best quality, fictional adult age 32, fully clothed, "
+       (:cue profile) ", "
+       (case (:keyword profile)
+         "blonde-hair" "blonde hair"
+         "sci-fi" "space station, futuristic city"
+         "fantasy" "enchanted forest, traveling cloak"
+         "dotpixel" "pixel art, visible pixel grid"
+         "outdoor" "botanical garden, trees"
+         "cosplay" "original space explorer costume"
+         "uniform" "adult professional wearing a tailored hotel uniform"
+         "stockings" "opaque stockings, knee length skirt, buttoned coat"
+         (str "theme: " (:keyword profile)))
+       ", " (nth ["waist up portrait, soft daylight" "full body, warm studio light"
+                   "three quarter portrait, cinematic evening light"] (mod n 3))
+       ", non-explicit, no nudity, no text"))
+
+(defn choose [history]
+  ;; Lowest successful count first; rotate ties by last attempt, then stable ID.
+  ;; An outage doesn't count as a success or starve the remaining profiles.
+  (first
+    (sort-by (fn [p]
+               (let [xs (filter #(= (:id p) (:profile %)) history)]
+                 [(count (filter #(#{"generated" "published"} (:state %)) xs))
+                  (or (last (sort (keep :hour xs))) "") (:id p)])) profiles)))

@@ -52,7 +52,7 @@
               (if-not (= 200 health)
                 (save! receipt {:state "skipped" :reason "health_failed" :status health})
                 (do
-                  (save! receipt {:state "submitting" :hour hour})
+                  (save! receipt {:state "submitting" :hour hour :profile (:profile request)})
                   (try
                     (let [out (path/join dir "response.json")
                           status (transport "POST" "/api/free/image" request out)
@@ -65,5 +65,6 @@
                           :else {:state "uncertain" :status status :reason "inspect_response_before_retry"})))
                     (catch :default _
                       (save! receipt {:state "uncertain" :reason "inspect_response_before_retry"}))))))
+            (save! receipt (assoc (read-json receipt) :hour hour :profile (:profile request)))
             (assoc (read-json receipt) :receipt receipt))))
       (finally (fs/rmdirSync lock)))))
