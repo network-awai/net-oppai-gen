@@ -30,4 +30,17 @@
                                           [:result :tools 1 :name])))))
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (set! (.-exitCode js/process) (if (t/successful? m) 0 1)))
+(deftest verify-deployment
+  (let [r (assoc receipt :state "deployed" :version "v1")
+        work (assoc (select-keys r [:title :model :profile :sha256])
+                    :id "producer-20260912T06Z" :producer "producer" :image "/img/producer-20260912T06Z.png")
+        catalog (str "(def public-works " (pr-str [work]) ")")
+        versions [{:created_on "2026-09-12" :versions [{:version_id "v1" :percentage 100}]}]
+        check #(p/verification "20260912T06Z" r %1 %2 %3)]
+    (is (= "deployment_verified" (:status (check versions digest catalog))))
+    (is (false? (:browser_verified (check versions digest catalog))))
+    (is (= "deployment_changed" (:status (check [] digest catalog))))
+    (is (= "artifact_mismatch" (:status (check versions "wrong" catalog))))
+    (is (= "artifact_mismatch" (:status (check versions digest "(def public-works [])"))))
+    (is (= "artifact_mismatch" (:status (check versions digest (str "(def public-works " (pr-str [work work]) ")")))))))
 (run-tests)

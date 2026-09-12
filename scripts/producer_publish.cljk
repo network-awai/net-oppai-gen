@@ -1,6 +1,6 @@
 (ns producer-publish
   "Local operator publishing adapter. Only reviewed free-generation receipts."
-  (:require [producer-io :as io] [oppai.gen.producer-profiles :as profiles]
+  (:require [cljs.reader :as reader] [producer-io :as io] [oppai.gen.producer-profiles :as profiles]
             ["fs" :as fs] ["path" :as path] ["os" :as os]
             ["crypto" :as crypto] ["child_process" :as cp]))
 
@@ -104,3 +104,45 @@
                 (io/save! rp result)
                 (select-keys result [:state :url :commit :version :sha256]))))
           (finally (fs/rmdirSync lock)))))))
+
+(defn verification [hour r deployments image-sha catalog-source]
+  (let [marker "(def public-works"
+        start (.indexOf catalog-source marker)
+        works (when (>= start 0) (nth (reader/read-string (subs catalog-source start)) 2))
+        matches (filter #(= (str "producer-" hour) (:id %)) works)
+        work (first matches)
+        active (:versions (last (sort-by :created_on deployments)))
+        checks {:active_version_matches (= [{:version_id (:version r) :percentage 100}] active)
+                :image_hash_matches (= (:sha256 r) image-sha)
+                :catalog_matches (and (= 1 (count matches))
+                                      (= (str "/img/producer-" hour ".png") (:image work))
+                                      (= "producer" (:producer work))
+                                      (= (select-keys r [:title :model :profile :sha256])
+                                         (select-keys work [:title :model :profile :sha256])))}]
+    {:hour hour :url (:url r) :receipt_state (:state r)
+     :status (cond (not (:active_version_matches checks)) "deployment_changed"
+                   (every? true? (vals checks)) "deployment_verified"
+                   :else "artifact_mismatch")
+     :checks checks :commit (:commit r) :version (:version r) :active_versions active
+     :checked_at (.toISOString (js/Date.))
+     :verification_scope "Cloudflare deployment control plane and committed source artifact"
+     :browser_verified false :public_image_fetch_verified false}))
+
+(defn verify! [repo hour]
+  (let [r (io/read-json (receipt-path hour))]
+    (when-not (and (#{"deployed" "published"} (:state r))
+                   (string? (:commit r)) (re-matches #"[a-f0-9]{40}" (:commit r))
+                   (string? (:sha256 r)) (re-matches #"[a-f0-9]{64}" (:sha256 r))
+                   (string? (:version r)) (re-matches #"[a-f0-9-]{36}" (:version r)))
+      (throw (js/Error. "A deployed receipt with commit, version and SHA256 is required")))
+    (when-not (= "https://github.com/network-awai/fans-oppai.git"
+                 (.trim (command repo ["git" "remote" "get-url" "origin"])))
+      (throw (js/Error. "Unexpected repository")))
+    (let [image (cp/execFileSync "git"
+                  (clj->js ["show" (str (:commit r) ":public/img/producer-" hour ".png")])
+                  #js {:cwd repo :timeout 30000 :maxBuffer 16777216})
+          catalog (command repo ["git" "show" (str (:commit r) ":src/oppai/gen/catalog.cljk")])
+          deployments (js->clj (js/JSON.parse
+                                (command repo ["npx" "wrangler" "deployments" "list" "--json"]))
+                               :keywordize-keys true)]
+      (verification hour r deployments (sha image) catalog))))

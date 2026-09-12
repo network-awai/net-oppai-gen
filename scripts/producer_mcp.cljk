@@ -11,7 +11,12 @@
                                              :sha256 {:type "string" :pattern "^[a-f0-9]{64}$"}
                                              :expected_version {:type "string"}}
                   :required ["hour" "sha256" "expected_version"] :additionalProperties false}
-    :annotations {:readOnlyHint false :destructiveHint false :idempotentHint true :openWorldHint true}}])
+    :annotations {:readOnlyHint false :destructiveHint false :idempotentHint true :openWorldHint true}}
+   {:name "producer_verify_post"
+    :description "Verify a deployed receipt against the active Cloudflare version and committed image/catalog. Read-only; reports deployment changes. Does not verify browser rendering or fetch the public image, and never marks published."
+    :inputSchema {:type "object" :properties {:hour {:type "string" :pattern "^[0-9]{8}T[0-9]{2}Z$"}}
+                  :required ["hour"] :additionalProperties false}
+    :annotations {:readOnlyHint true :openWorldHint true}}])
 (defn handle [m]
   (let [id (:id m) method (:method m)]
     (when (some? id)
@@ -31,6 +36,7 @@
                          (let [a (get-in m [:params :arguments])
                                result (case (get-in m [:params :name])
                                         "producer_list_posts" (p/pending)
+                                        "producer_verify_post" (p/verify! (or (.-OPPAI_REPO js/process.env) (.cwd js/process)) (:hour a))
                                         "producer_publish" (p/publish! (or (.-OPPAI_REPO js/process.env) (.cwd js/process))
                                                                                (:hour a) (:sha256 a) (:expected_version a))
                                         (throw (js/Error. "Unknown tool")))]

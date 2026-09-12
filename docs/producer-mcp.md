@@ -28,3 +28,18 @@ generation until that verification is complete. Browser access restrictions
 must never be worked around using this server.
 
 Verify locally with `kbb --backend sci --classpath scripts:src test/producer_publish_test.cljk`.
+
+## Verify a post from MCP
+
+Call `producer_verify_post` with `{"hour":"20260912T06Z"}`. This read-only tool
+compares the receipt version with the current 100% Cloudflare deployment and
+checks the committed PNG SHA256 and catalog metadata. It returns
+`deployment_verified`, `deployment_changed`, or `artifact_mismatch`, along with
+individual checks and a timestamp. Invalid or unavailable evidence is a tool
+error, never a successful verification.
+
+This is control-plane and source-artifact evidence, not an HTTP fetch of the
+public image or browser rendering proof. Both `browser_verified` and
+`public_image_fetch_verified` remain false. The tool does not modify receipts,
+mark them published, generate images, or redeploy. After a subsequent deployment,
+`deployment_changed` requires review even if that release may retain the post.
