@@ -23,8 +23,8 @@ existing matching committed image. Uncertain deployment outcomes require
 inspection before supplying a new expected version.
 
 `deployed` is distinct from `published`: verify the public detail and image
-before setting the receipt to published. A deployed receipt blocks additional
-generation until that verification is complete. Browser access restrictions
+before setting the receipt to published. A deployed receipt does not block generation in the next hour; browser
+verification is tracked separately. Browser access restrictions
 must never be worked around using this server.
 
 Verify locally with `kbb --backend sci --classpath scripts:src test/producer_publish_test.cljk`.
@@ -43,3 +43,10 @@ public image or browser rendering proof. Both `browser_verified` and
 `public_image_fetch_verified` remain false. The tool does not modify receipts,
 mark them published, generate images, or redeploy. After a subsequent deployment,
 `deployment_changed` requires review even if that release may retain the post.
+
+2026-09-12 operator update: Browser verification is non-blocking for hourly
+creation. Keep deployed receipts as deployed (not browser-verified/published),
+run producer_verify_post to report deployment/artifact evidence, and proceed
+with the next hour's free generation. Generated, submitting and uncertain
+receipts still require recovery to prevent duplicate requests. Never work around
+browser access controls. Free quota and uncertain-request limits still apply.

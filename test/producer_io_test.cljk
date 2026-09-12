@@ -38,4 +38,13 @@
                    (fn [method _ _ out] (p/save! out {}) (if (= method "GET") 200 429)))))))
 (defmethod t/report [:cljs.test/default :end-run-tests] [m]
   (set! (.-exitCode js/process) (if (t/successful? m) 0 1)))
+(deftest deployed-does-not-block-next-hour
+  (let [root (temp) calls (atom 0)
+        send (fn [_ _ _ out] (swap! calls inc)
+               (p/save! out {:price 0 :image "data:image/png;base64,test"}) 200)]
+    (fs/mkdirSync (path/join root "20260912T06Z"))
+    (p/save! (path/join root "20260912T06Z/receipt.json") {:state "deployed" :browser_verified false})
+    (is (= "generated" (:state (p/run! root "20260912T07Z" request send))))
+    (is (= "generated" (:state (p/run! root "20260912T07Z" request send))))
+    (is (= 2 @calls))))
 (run-tests)

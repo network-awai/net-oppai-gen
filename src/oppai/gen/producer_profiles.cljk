@@ -108,5 +108,5 @@
   (first
     (sort-by (fn [p]
                (let [xs (filter #(= (:id p) (:profile %)) history)]
-                 [(count (filter #(#{"generated" "published"} (:state %)) xs))
+                 [(count (filter #(#{"generated" "deployed" "published"} (:state %)) xs))
                   (or (last (sort (keep :hour xs))) "") (:id p)])) profiles)))

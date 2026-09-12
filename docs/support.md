@@ -51,3 +51,10 @@ Verification: `npm test`, guarded `npm run build`, then `nbb test/support_worker
 Reviewed operator sample: `/img/producer-10eros-max-20260911.mp4`, SHA256 `581100e3731db88353c90f9ff419f59bc229267150d46441ef912138cd1d6623`, adult fully clothed garden portrait. All three inspected frames retain adult clothing; node completed the 39-frame MP4.
 
 Balanced profiles use the reviewed data in `src/oppai/gen/producer_profiles.cljk`. Preserve `:profile` from the request/receipt in the public-works entry while retaining `:producer "producer"`. The original keyword belongs in the work tags when it describes the reviewed output. Never manufacture an image to fill an empty profile. Verify profile routing via `#producer/<profile-id>`.
+
+2026-09-12 operator update: Browser verification is non-blocking for hourly
+creation. Keep deployed receipts as deployed (not browser-verified/published),
+run producer_verify_post to report deployment/artifact evidence, and proceed
+with the next hour's free generation. Generated, submitting and uncertain
+receipts still require recovery to prevent duplicate requests. Never work around
+browser access controls. Free quota and uncertain-request limits still apply.
