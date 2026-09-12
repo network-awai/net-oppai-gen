@@ -1,0 +1,323 @@
+(ns oppai.gen.bot
+  "The oppai.fans studio bot, as pure functions over `bots/oppai-studio.edn`.
+
+  Four questions, each answered without I/O so the tests can pin them:
+
+  1. **Is the profile sound?** `validate-profile` — every lane names a model
+     and nodes, every bank entry is clean of `:forbidden` and of
+     `guard/minor-terms`, `:adult-markers` is non-empty. A profile that fails
+     here is not a bot with a bug, it is not a bot.
+  2. **What is job n of lane L?** `compose` — deterministic from the profile
+     and a seed, so a run is reproducible and a receipt can be re-derived.
+     Every image / video prompt carries an adult marker verbatim and is then
+     checked (`allowed?`) as if it had come from a stranger: composition is
+     not trusted just because it is ours.
+  3. **Which node takes it?** `assign` — the lane's least-loaded node under
+     the per-node queue cap, or nil when all are full (nil means *wait*,
+     never *pick anyway*).
+  4. **Is what came back worth keeping?** `quality` — byte floors and
+     dimensions per kind; `:fail` names its reason, `:pass` is never the
+     default for an unmeasured artifact.
+
+  The I/O half — ssh, ComfyUI's HTTP API, the ledger — is
+  `scripts/oppai_studio_tick.cljk`, which calls only these."
+  (:require [kotoba.lang.text :as str]
+            [oppai.gen.guard :as guard]))
+
+;; ---- prng ----------------------------------------------------------------------
+
+(defn- lcg
+  "Numerical Recipes LCG on 32 bits. Not for secrets — for reproducible picks."
+  [s]
+  (let [a 1664525 c 1013904223 m 4294967296]
+    (mod (+ (* (mod s m) a) c) m)))
+
+(defn seq-of
+  "n pseudo-random non-negative integers from `seed`, deterministic."
+  [seed n]
+  (loop [s (lcg (+ (long seed) 0x9E3779B9)) acc []]
+    (if (= (count acc) n)
+      acc
+      (let [s2 (lcg s)]
+        (recur s2 (conj acc (quot s2 65536)))))))
+
+(defn- pick [bank r]
+  (nth bank (mod r (count bank))))
+
+;; ---- policy --------------------------------------------------------------------
+
+(defn- tokens [s]
+  (remove str/blank? (str/split (str/lower (str s)) #"[^a-z0-9]+")))
+
+(defn forbidden-hit
+  "The first forbidden term `text` contains, or nil. Single words match as
+  whole tokens, phrases as substrings (see the profile's `:forbidden` note)."
+  [forbidden text]
+  (let [low (str/lower (str text))
+        toks (set (tokens low))]
+    (some (fn [term]
+            (let [t (str/lower term)]
+              (when (if (re-find #"\s|-" t)
+                      (str/includes? low t)
+                      (contains? toks t))
+                term)))
+          forbidden)))
+
+(defn allowed?
+  "The whole boundary, as one predicate: not a minor (guard), not forbidden
+  (profile). Returns [true nil] or [false reason]."
+  [profile text]
+  (cond
+    (guard/minor? text) [false (str "minor term in prompt")]
+    :else (if-let [hit (forbidden-hit (get-in profile [:bot/policy :forbidden]) text)]
+            [false (str "forbidden term: " hit)]
+            [true nil])))
+
+(defn adult-marked?
+  "Does `text` carry one of the profile's adult markers verbatim?"
+  [profile text]
+  (let [low (str/lower (str text))
+        markers (concat (get-in profile [:bot/policy :adult-markers])
+                        (get-in profile [:bot/policy :adult-tags]))]
+    (boolean (some #(str/includes? low (str/lower %)) markers))))
+
+;; ---- profile -------------------------------------------------------------------
+
+(def lane-kinds #{:txt2img :ltx-t2v :svd-i2v :tts :generation-api-video})
+
+(defn validate-profile
+  "-> [profile nil] | [nil [problem ...]]. Every problem is a sentence a
+  person can act on; an empty vector of problems is not returned."
+  [p]
+  (let [problems
+        (cond-> []
+          (not (string? (:bot/id p))) (conj ":bot/id missing")
+          (empty? (:bot/lanes p)) (conj ":bot/lanes is empty")
+          (empty? (get-in p [:bot/policy :adult-markers])) (conj ":bot/policy :adult-markers is empty")
+          (empty? (get-in p [:bot/policy :adult-tags])) (conj ":bot/policy :adult-tags is empty")
+          (empty? (get-in p [:bot/policy :forbidden])) (conj ":bot/policy :forbidden is empty"))
+        problems
+        (reduce (fn [acc {:lane/keys [id kind model nodes]}]
+                  (cond-> acc
+                    (not (keyword? id)) (conj "a lane has no :lane/id")
+                    (not (contains? lane-kinds kind)) (conj (str "lane " id " has unknown kind " (pr-str kind)))
+                    (str/blank? (str model)) (conj (str "lane " id " names no model"))
+                    (empty? nodes) (conj (str "lane " id " has no nodes"))))
+                problems (:bot/lanes p))
+        dup-nodes (->> (:bot/lanes p) (mapcat :lane/nodes) frequencies (filter #(> (val %) 1)) (map key))
+        problems (if (seq dup-nodes)
+                   (conj problems (str "node(s) claimed by more than one lane: " (str/join ", " dup-nodes)))
+                   problems)
+        forbidden (get-in p [:bot/policy :forbidden])
+        problems (reduce (fn [acc [bank entries]]
+                           (reduce (fn [acc e]
+                                     (let [texts (remove nil? [(:tags e) (:natural e) (:text e)])]
+                                       (reduce (fn [acc t]
+                                                 (cond
+                                                   (guard/minor? t) (conj acc (str "bank " bank " entry names a minor: " (pr-str t)))
+                                                   (forbidden-hit forbidden t) (conj acc (str "bank " bank " entry hits forbidden term "
+                                                                                              (forbidden-hit forbidden t) ": " (pr-str t)))
+                                                   :else acc))
+                                               acc texts)))
+                                   acc entries))
+                         problems (:bot/banks p))
+        problems (reduce (fn [acc m] (if (guard/minor? m) (conj acc (str "adult marker names a minor: " m)) acc))
+                         problems (concat (get-in p [:bot/policy :adult-markers]) (get-in p [:bot/policy :adult-tags])))]
+    (if (seq problems) [nil problems] [p nil])))
+
+(defn lane [profile id]
+  (some #(when (= id (:lane/id %)) %) (:bot/lanes profile)))
+
+(defn lane-index [profile id]
+  (some (fn [[i l]] (when (= id (:lane/id l)) i)) (map-indexed vector (:bot/lanes profile))))
+
+(defn node->lane
+  "The lane a node belongs to, or nil."
+  [profile node]
+  (some #(when (some #{node} (:lane/nodes %)) %) (:bot/lanes profile)))
+
+;; ---- composition ----------------------------------------------------------------
+
+(defn job-seed [profile lane-id n]
+  (+ (get-in profile [:bot/schedule :seed-base] 0) (* 7 n) (or (lane-index profile lane-id) 0)))
+
+(defn- negative-for [profile lane]
+  (guard/with-minor-negative
+   (str/join ", " (remove str/blank? [(:lane/negative lane)
+                                      (get-in profile [:bot/policy :negative-floor])]))))
+
+(defn- prompt-for
+  "The positive prompt for a lane, from one pick per bank — and, from the
+  very same picks, the structured tags the work carries (shinshi-style:
+  every work is tagged, whatever style its prompt was written in).
+  -> {:prompt \"...\" :tags [...]}, deterministic from the same rs. A bank
+  entry without a :tags form contributes nothing to :tags (dropped, not
+  invented); the adult marker pick leads the list."
+  [profile lane rs]
+  (let [banks (:bot/banks profile)
+        [r-adult r-body r-look r-outfit r-act r-expr r-scene r-cam] rs
+        tags? (= :tags (:lane/prompt-style lane))
+        f (if tags? :tags :natural)
+        picked [(pick (:body banks) r-body) (pick (:look banks) r-look)
+                (pick (:outfit banks) r-outfit) (pick (:act banks) r-act)
+                (pick (:expression banks) r-expr) (pick (:scene banks) r-scene)
+                (pick (:camera banks) r-cam)]
+        adult (pick (get-in profile [:bot/policy (if tags? :adult-tags :adult-markers)]) r-adult)
+        tags (vec (remove str/blank? (cons adult (keep :tags picked))))
+        parts (map f picked)]
+    {:tags tags
+     :prompt (if tags?
+               (str/join ", " (remove str/blank? (concat [(:lane/quality lane) adult] parts)))
+               ;; natural: "<quality>, photo of a woman (adult marker) with …, <look>, <outfit>, <act>, <expr>, <scene>, <camera>"
+               (str/join ", " (remove str/blank? (concat [(:lane/quality lane)
+                                                          (str "photo of a woman (" adult ") " (nth parts 0) ", " (nth parts 1))
+                                                          (nth parts 2) (nth parts 3) (nth parts 4) (nth parts 5) (nth parts 6)]))))}))
+
+(defn compose
+  "Job n of lane `lane-id` -> a job map, or throws when the result would not
+  pass the boundary (which is a bug in the banks, never something to skip
+  quietly). Kinds:
+
+    :txt2img              {:prompt :tags :negative :model :width :height :steps :cfg :seed}
+    :ltx-t2v              + {:clip :seconds :fps}
+    :svd-i2v              {:seed :seconds :fps :width :height :steps} (image supplied by the tick)
+    :tts                  {:text :seed} (voice lines carry no tags)
+    :generation-api-video {:prompt :tags :seconds :width :height :seed}"
+  [profile lane-id n]
+  (let [l (or (lane profile lane-id) (throw (ex-info "no such lane" {:lane lane-id})))
+        seed (job-seed profile lane-id n)
+        rs (seq-of seed 10)
+        base {:bot (:bot/id profile) :lane lane-id :n n :seed seed :kind (:lane/kind l)
+              :model (:lane/model l) :checkpoint (:lane/checkpoint l) :nodes (:lane/nodes l)}
+        check! (fn [job text tags]
+                 (let [[ok reason] (allowed? profile text)]
+                   (when-not ok (throw (ex-info "composed prompt fails the boundary" {:reason reason :job job})))
+                   (when-not (adult-marked? profile text)
+                     (throw (ex-info "composed prompt carries no adult marker" {:job job})))
+                   (when (seq tags)
+                     (let [joined (str/join ", " tags)
+                           [tok treason] (allowed? profile joined)]
+                       (when-not tok (throw (ex-info "composed tags fail the boundary" {:reason treason :job job})))
+                       (when-not (adult-marked? profile joined)
+                         (throw (ex-info "composed tags carry no adult marker" {:job job})))))
+                   job))]
+    (case (:lane/kind l)
+      :txt2img
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)
+            [w h] (guard/parse-size (pick (:lane/sizes l) (nth rs 8)))]
+        (check! (assoc base :prompt prompt :tags tags :negative (negative-for profile l)
+                       :width w :height h :steps (:lane/steps l 26) :cfg (:lane/cfg l 6.0))
+                prompt tags))
+      :ltx-t2v
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)]
+        (check! (assoc base :prompt prompt :tags tags :negative (negative-for profile l)
+                       :clip (:lane/clip l) :width (:lane/width l) :height (:lane/height l)
+                       :seconds (:lane/seconds l) :fps (:lane/fps l)
+                       :steps (:lane/steps l) :cfg (:lane/cfg l))
+                prompt tags))
+      :svd-i2v
+      (assoc base :source-lanes (:lane/source-lanes l) :width (:lane/width l) :height (:lane/height l)
+             :seconds (:lane/seconds l) :fps (:lane/fps l) :steps (:lane/steps l))
+      :tts
+      (let [line (pick (get-in profile [:bot/banks :voice-lines]) (nth rs 0))]
+        (assoc base :text (:text line) :voice (:lane/voice l) :mlx-repo (:lane/mlx-repo l)))
+      :generation-api-video
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)]
+        (check! (assoc base :prompt prompt :tags tags :width (:lane/width l) :height (:lane/height l)
+                       :seconds (:lane/seconds l))
+                prompt tags)))))
+
+;; ---- placement ---------------------------------------------------------------------
+
+(defn assign
+  "The node for a lane given `queues` {node queue-depth} (a node absent from
+  `queues` is unmeasured and never picked). Least loaded under the cap, ties
+  by lane order; nil when every node is at the cap or unmeasured."
+  [profile lane-id queues]
+  (let [l (lane profile lane-id)
+        cap (get-in profile [:bot/schedule :per-node-queue-max] 1)]
+    (->> (:lane/nodes l)
+         (keep (fn [n] (when-let [q (get queues n)] (when (< q cap) [q n]))))
+         (sort-by first)
+         first
+         second)))
+
+;; ---- quality -------------------------------------------------------------------------
+
+(defn quality
+  "-> {:verdict :pass|:fail|:unmeasured :reasons [...]} for one artifact
+  {:kind :image|:video|:audio :bytes n :width w :height h :seconds s}.
+  Missing measurements are :unmeasured, not :pass."
+  [profile {:keys [kind bytes width height seconds]}]
+  (let [floors (get-in profile [:bot/output :quality kind])]
+    (cond
+      (nil? floors) {:verdict :unmeasured :reasons [(str "no quality floor for kind " (pr-str kind))]}
+      (not (number? bytes)) {:verdict :unmeasured :reasons ["bytes not measured"]}
+      :else
+      (let [reasons (cond-> []
+                      (< bytes (:min-bytes floors 0)) (conj (str "bytes " bytes " < floor " (:min-bytes floors)))
+                      (and (:min-side floors) (not (and (number? width) (number? height))))
+                      (conj "dimensions not measured")
+                      (and (:min-side floors) (number? width) (number? height)
+                           (< (min width height) (:min-side floors)))
+                      (conj (str "min side " (min width height) " < floor " (:min-side floors)))
+                      (and (:min-seconds floors) (not (number? seconds))) (conj "duration not measured")
+                      (and (:min-seconds floors) (number? seconds) (< seconds (:min-seconds floors)))
+                      (conj (str "seconds " seconds " < floor " (:min-seconds floors))))]
+        (if (seq reasons)
+          {:verdict (if (some #(str/includes? % "not measured") reasons) :unmeasured :fail) :reasons reasons}
+          {:verdict :pass :reasons []})))))
+
+;; ---- graphs (ComfyUI API JSON as data) -----------------------------------------------
+;; Same shapes as kotoba-lang/murakumo's murakumo.infer.media, kept boring.
+
+(defn txt2img-graph [{:keys [checkpoint prompt negative width height steps cfg seed]} prefix]
+  {"1" {:class_type "CheckpointLoaderSimple" :inputs {:ckpt_name checkpoint}}
+   "2" {:class_type "CLIPTextEncode" :inputs {:clip ["1" 1] :text prompt}}
+   "3" {:class_type "CLIPTextEncode" :inputs {:clip ["1" 1] :text negative}}
+   "4" {:class_type "EmptyLatentImage" :inputs {:width width :height height :batch_size 1}}
+   "5" {:class_type "KSampler" :inputs {:model ["1" 0] :positive ["2" 0] :negative ["3" 0]
+                                        :latent_image ["4" 0] :seed seed :steps steps
+                                        :cfg cfg :sampler_name "euler_ancestral"
+                                        :scheduler "normal" :denoise 1.0}}
+   "6" {:class_type "VAEDecode" :inputs {:samples ["5" 0] :vae ["1" 2]}}
+   "7" {:class_type "SaveImage" :inputs {:images ["6" 0] :filename_prefix prefix}}})
+
+(defn ltx-t2v-graph [{:keys [checkpoint clip prompt negative width height seconds fps steps cfg seed]} prefix]
+  (let [length (inc (* 8 (max 1 (quot (* fps seconds) 8))))]
+    {"1" {:class_type "CheckpointLoaderSimple" :inputs {:ckpt_name checkpoint}}
+     "9" {:class_type "CLIPLoader" :inputs {:clip_name clip :type "ltxv"}}
+     "2" {:class_type "CLIPTextEncode" :inputs {:clip ["9" 0] :text prompt}}
+     "3" {:class_type "CLIPTextEncode" :inputs {:clip ["9" 0] :text negative}}
+     "4" {:class_type "EmptyLTXVLatentVideo" :inputs {:width width :height height :length length :batch_size 1}}
+     "5" {:class_type "LTXVConditioning" :inputs {:positive ["2" 0] :negative ["3" 0] :frame_rate fps}}
+     "6" {:class_type "KSampler" :inputs {:model ["1" 0] :positive ["5" 0] :negative ["5" 1]
+                                          :latent_image ["4" 0] :seed seed :steps steps
+                                          :cfg cfg :sampler_name "euler" :scheduler "normal" :denoise 1.0}}
+     "7" {:class_type "VAEDecode" :inputs {:samples ["6" 0] :vae ["1" 2]}}
+     "8" {:class_type "SaveAnimatedWEBP" :inputs {:images ["7" 0] :filename_prefix prefix
+                                                  :fps fps :lossless false :quality 85 :method "default"}}}))
+
+(defn svd-i2v-graph [{:keys [checkpoint image width height seconds fps steps seed]} prefix]
+  (let [frames (int (* fps seconds))]
+    {"1" {:class_type "ImageOnlyCheckpointLoader" :inputs {:ckpt_name checkpoint}}
+     "2" {:class_type "LoadImage" :inputs {:image image}}
+     "4" {:class_type "SVD_img2vid_Conditioning"
+          :inputs {:clip_vision ["1" 1] :init_image ["2" 0] :vae ["1" 2]
+                   :width width :height height :video_frames frames
+                   :motion_bucket_id 127 :fps fps :augmentation_level 0.0}}
+     "5" {:class_type "KSampler" :inputs {:model ["1" 0] :positive ["4" 0] :negative ["4" 1]
+                                          :latent_image ["4" 2] :seed seed :steps steps
+                                          :cfg 3.0 :sampler_name "euler" :scheduler "karras" :denoise 1.0}}
+     "6" {:class_type "VAEDecode" :inputs {:samples ["5" 0] :vae ["1" 2]}}
+     "7" {:class_type "SaveAnimatedWEBP" :inputs {:images ["6" 0] :filename_prefix prefix
+                                                  :fps fps :lossless false :quality 85 :method "default"}}}))
+
+(defn graph
+  "The ComfyUI graph for a job, or nil for kinds that are not ComfyUI graphs."
+  [job prefix]
+  (case (:kind job)
+    :txt2img (txt2img-graph job prefix)
+    :ltx-t2v (ltx-t2v-graph job prefix)
+    :svd-i2v (svd-i2v-graph job prefix)
+    nil))

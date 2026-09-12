@@ -1,13 +1,14 @@
 (ns run-tests
   "`npm test` — the portable suite, on nbb.
 
-  JVM-free replacement for the old `clojure -M:local:test`
+  JVM-free replacement for the old `kbb -M:local:test`
   (owner decision 2026-09-06). Same `.cljc` test namespaces the JVM runner
   drove; `cljs.test` reports the same counts and exits non-zero on any
   failure or error."
   (:require [cljs.test :as t]
             [node-io]
             [oppai.gen.billing-test]
+            [oppai.gen.bot-test]
             [oppai.gen.catalog-test]
             [oppai.gen.chat-test]
             [oppai.gen.db-test]
@@ -25,6 +26,7 @@
   (js/process.exit (if (t/successful? m) 0 1)))
 
 (t/run-tests 'oppai.gen.billing-test
+             'oppai.gen.bot-test
              'oppai.gen.catalog-test
              'oppai.gen.chat-test
              'oppai.gen.db-test

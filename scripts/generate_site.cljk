@@ -1,7 +1,7 @@
 (ns generate-site
   "`npm run generate-site` — writes public/index.html and the model LPs.
 
-  JVM-free replacement for the old `clojure -M:local:generate-site`
+  JVM-free replacement for the old `kbb -M:local:generate-site`
   (owner decision 2026-09-06). Same generator: `oppai.gen.site/generate!`."
   (:require [node-io]
             [oppai.gen.site :as site]))

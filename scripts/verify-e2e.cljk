@@ -1,11 +1,11 @@
 ;; Real-Chromium verification for the oppai.fans shell (nbb — repo rule:
-;; new Node harnesses are nbb .cljs, not raw .mjs).
+;; new Node harnesses are kbb --backend sci .cljk, not raw .mjs).
 ;;
 ;; Prereqs (verification-only; playwright is deliberately NOT a package.json dep):
 ;;   npm run build
 ;;   npm install --no-save playwright && npx playwright install chromium
 ;; Run:
-;;   npx nbb scripts/verify-e2e.cljk [screenshot-dir]
+;;   kbb --backend sci scripts/verify-e2e.cljk [screenshot-dir]
 ;;
 ;; It serves public/ statically, so /api/* does not exist here — that is the
 ;; point of the split. What can be checked without the Worker is checked:

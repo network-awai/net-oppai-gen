@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  network.awai.bot.oppai-studio — the oppai.fans studio bot loop
+  (com-junkawasaki/root ADR-2609117000).
+
+  Every 5 minutes: collect what the fleet finished, keep every node's ComfyUI
+  queue at the profile's cap, run the audio lines, write receipts. No model
+  is consulted (`claude -p` is never called); prompts are composed from
+  bots/oppai-studio.edn and pass the same guard the Worker enforces.
+
+  Install (operator Mac, the one with ssh to the fleet):
+    cp orgs/network-awai/fans-oppai/deploy/network.awai.bot.oppai-studio.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/network.awai.bot.oppai-studio.plist
+    launchctl kickstart -k gui/$(id -u)/network.awai.bot.oppai-studio
+  Verify it loaded THIS definition (a bootstrap that returns is not proof):
+    launchctl print gui/$(id -u)/network.awai.bot.oppai-studio | grep -E 'state|program|stdout'
+  Unload:
+    launchctl bootout gui/$(id -u)/network.awai.bot.oppai-studio
+
+  The job calls nbb directly rather than `npm run bot:tick`: measured
+  2026-09-11, the third launchd run hung inside npm for 8 minutes before
+  ever starting the script (stuck after "verbose logfile", no child
+  process), while the same command from a shell was fine. A loop that
+  depends on npm's startup is a loop that stops without saying so.
+
+  And `zsh -c`, not `-lc`: the login shell sources ~/.zprofile, whose
+  `brew shellenv` took over 20 s of CPU under this workstation's usual
+  load (100+, many concurrent agents) before the tick even started. PATH is
+  set explicitly above, so nothing in the profile is needed.
+
+  No ProcessType=Background: measured 2026-09-11 21:22, load average 134 on
+  this workstation, a Background-class tick sat 6 minutes in V8's parser at
+  0% CPU before running a line of the script. The tick is the only thing
+  keeping eight GPUs fed; it does not get to be the lowest-priority process
+  on the box.
+
+  State and artifacts: ~/.itonami/oppai-studio/ (receipts.edn is append-only).
+  lock: ~/.itonami/oppai-studio/tick.lock (a tick that finds a fresh lock exits 2).
+-->
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>COM_JUNKAWASAKI_ROOT</key>
+		<string>/Users/junkawasaki/github/com-junkawasaki</string>
+		<key>HOME</key>
+		<string>/Users/junkawasaki</string>
+		<key>LOGNAME</key>
+		<string>junkawasaki</string>
+		<key>PATH</key>
+		<string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+		<key>SHELL</key>
+		<string>/bin/zsh</string>
+		<key>USER</key>
+		<string>junkawasaki</string>
+		<key>OPPAI_RESOURCE_PATH</key>
+		<string>/Users/junkawasaki/github/com-junkawasaki/orgs/kotoba-lang/jp-go-digital-design-system/resources</string>
+	</dict>
+	<key>Label</key>
+	<string>network.awai.bot.oppai-studio</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>-c</string>
+		<string>cd "$COM_JUNKAWASAKI_ROOT/orgs/network-awai/fans-oppai" &amp;&amp; kbb --backend sci scripts/cljk_mirror.cljk &amp;&amp; exec kbb --backend sci --classpath .cljk-build/src:.cljk-build/scripts:../../kotoba-lang/text/src .cljk-build/scripts/oppai_studio_tick.cljs</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/junkawasaki/.itonami/oppai-studio/tick.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/junkawasaki/.itonami/oppai-studio/tick.log</string>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>WorkingDirectory</key>
+	<string>/Users/junkawasaki/github/com-junkawasaki/orgs/network-awai/fans-oppai</string>
+</dict>
+</plist>

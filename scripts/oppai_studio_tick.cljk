@@ -1,0 +1,454 @@
+(ns oppai-studio-tick
+  "One tick of the oppai.fans studio bot: keep every fleet node's queue fed,
+  collect what finished, measure it, write receipts. No model is consulted;
+  everything the bot says is composed from `bots/oppai-studio.edn` by
+  `oppai.gen.bot` and every prompt passes the same guard the Worker uses.
+
+  The fleet is reached the way `murakumo.infer.media` and the shinshi catalog
+  loop reach it — ssh to the node, curl its ComfyUI on loopback — so no fleet
+  port is exposed and no generation token is spent. gad's 10Eros lane goes
+  through the generation API on gad's OWN loopback (:8081), with the token
+  read on gad inside the ssh session; it never crosses to this machine.
+
+  State (all under ~/.itonami/oppai-studio/):
+    pending.edn    {prompt-id job}         jobs submitted, not yet collected
+    counters.edn   {lane n}                next job number per lane
+    receipts.edn   one EDN map per line    append-only measurement ledger
+    out/<node>/    the artifacts
+
+  Exit codes are answers, not moods:
+    0  tick ran; every node answered
+    1  tick ran; some node did not answer (its lane was skipped, and said so)
+    2  could not run: profile invalid, lock held, or state unreadable
+
+  usage: npm run bot:tick -- [--dry-run] [--only node,node] [--profile bots/oppai-studio.edn]
+         npm run bot:tick -- --report          # the ledger, per node; touches nothing"
+  (:require ["fs" :as fs]
+            ["path" :as path]
+            ["os" :as os]
+            ["child_process" :as cp]
+            ["crypto" :as crypto]
+            [cljs.reader :as reader]
+            [kotoba.lang.text :as str]
+            [oppai.gen.bot :as bot]))
+
+(def argv (vec (.slice js/process.argv 2)))
+(defn- flag? [f] (boolean (some #{f} argv)))
+(defn- opt [n] (let [i (.indexOf argv n)] (when (and (>= i 0) (< (inc i) (count argv))) (nth argv (inc i)))))
+
+(def dry-run? (flag? "--dry-run"))
+(def only (some-> (opt "--only") (str/split #",") set))
+(def profile-file (or (opt "--profile") "bots/oppai-studio.edn"))
+
+(def home (.homedir os))
+(def state-dir (str home "/.itonami/oppai-studio"))
+(def out-dir (str state-dir "/out"))
+(def lock-file (str state-dir "/tick.lock"))
+(def comfy-port 8188)
+
+;; ---------------------------------------------------------------- io helpers
+
+(defn- now-iso [] (.toISOString (js/Date.)))
+(defn- read-edn [p default]
+  (if (fs/existsSync p)
+    (reader/read-string (fs/readFileSync p "utf8"))
+    default))
+(defn- write-edn! [p v]
+  (fs/mkdirSync (path/dirname p) #js {:recursive true})
+  (fs/writeFileSync p (pr-str v)))
+(defn- append-line! [p v]
+  (fs/mkdirSync (path/dirname p) #js {:recursive true})
+  (fs/appendFileSync p (str (pr-str v) "\n")))
+
+(defn ssh
+  "Run `script` on `host` under /bin/sh (the minis' login shell is zsh, and a
+  zsh glob with no match is fatal — measured on the fleet 2026-09-11).
+  Returns {:exit :out} with :out a Buffer when `binary?`."
+  ([host script] (ssh host script false))
+  ([host script binary?]
+   (try
+     ;; no "encoding" key at all = a Buffer back; "utf8" = a string. (Node
+     ;; rejects encoding "buffer" as unknown — measured, the first tts fetch.)
+     (let [opts (js-obj "input" script "stdio" (array "pipe" "pipe" "pipe")
+                        "timeout" 120000 "maxBuffer" (* 64 1024 1024))
+           _ (when-not binary? (aset opts "encoding" "utf8"))
+           out (.execFileSync cp "ssh"
+                              (clj->js ["-o" "BatchMode=yes" "-o" "ConnectTimeout=10" host "/bin/sh -s"])
+                              opts)]
+       {:exit 0 :out out})
+     (catch :default e
+       {:exit (or (.-status e) 1) :err (str (.-stderr e)) :out (.-stdout e)}))))
+
+(defn- json-parse [s] (try (js->clj (js/JSON.parse (str s)) :keywordize-keys true) (catch :default _ nil)))
+
+(defn- sh-quote [s] (str "'" (str/replace (str s) "'" "'\\''") "'"))
+(defn- sh-quote-dollar
+  "Double-quoted, so $HOME expands and everything else is literal."
+  [s] (str "\"" (str/replace (str s) "\"" "\\\"") "\""))
+
+(defn- sha256 [buf] (.digest (.update (crypto/createHash "sha256") buf) "hex"))
+
+(defn png-size
+  "[w h] from a PNG IHDR, or nil."
+  [buf]
+  (when (and (>= (.-length buf) 24) (= 0x89 (aget buf 0)) (= 0x50 (aget buf 1)))
+    [(.readUInt32BE buf 16) (.readUInt32BE buf 20)]))
+
+;; ---------------------------------------------------------------- comfy over ssh
+
+(defn comfy-queue
+  "Queue depth of the node's ComfyUI (running + pending), or nil when it
+  could not be asked. nil is 'unmeasured' — `bot/assign` never picks it."
+  [host]
+  (let [r (ssh host (str "curl -s --max-time 8 http://localhost:" comfy-port "/queue"))]
+    (when (zero? (:exit r))
+      (when-let [q (json-parse (:out r))]
+        (+ (count (:queue_running q)) (count (:queue_pending q)))))))
+
+(defn comfy-submit!
+  "POST the graph; -> prompt_id or nil (with the node's error printed)."
+  [host graph client-id]
+  (let [body (js/JSON.stringify (clj->js {:prompt graph :client_id client-id}))
+        r (ssh host (str "curl -s --max-time 30 -X POST -H 'content-type: application/json' "
+                         "--data-binary @- http://localhost:" comfy-port "/prompt <<'OPPAI_GRAPH'\n" body "\nOPPAI_GRAPH\n"))
+        resp (when (zero? (:exit r)) (json-parse (:out r)))]
+    (if-let [id (:prompt_id resp)]
+      id
+      (do (println "  submit failed on" host ":" (or (some-> resp :error pr-str) (:err r) (str (:out r)))) nil))))
+
+(defn comfy-history
+  "-> {:status :done|:running|:error|:unknown :outputs [{:filename :subfolder :type}]}"
+  [host prompt-id]
+  (let [r (ssh host (str "curl -s --max-time 8 http://localhost:" comfy-port "/history/" prompt-id))
+        h (when (zero? (:exit r)) (json-parse (:out r)))
+        entry (get h (keyword prompt-id))]
+    (cond
+      (nil? h) {:status :unknown}
+      (nil? entry) {:status :running}
+      (= "error" (get-in entry [:status :status_str])) {:status :error :messages (get-in entry [:status :messages])}
+      :else {:status :done
+             :outputs (vec (for [[_ node-out] (:outputs entry)
+                                 k [:images :gifs :videos]
+                                 o (get node-out k)]
+                             (select-keys o [:filename :subfolder :type])))})))
+
+(defn comfy-fetch!
+  "Bring one output home, then delete it on the node. -> {:path :bytes :buf} or nil.
+
+  The delete is what keeps a 24h loop from filling a mini's disk: ~1.3 MB a
+  still, ~100 stills an hour across the image lanes, and asher started the
+  day with 34 GiB free. Deleted only after the bytes are on this machine and
+  their length matches; a fetch that came back short leaves the file."
+  [host {:keys [filename subfolder type]} node]
+  (let [q (str "filename=" (js/encodeURIComponent filename) "&subfolder=" (js/encodeURIComponent (or subfolder ""))
+               "&type=" (or type "output"))
+        r (ssh host (str "curl -s --max-time 60 'http://localhost:" comfy-port "/view?" q "'") true)]
+    (when (and (zero? (:exit r)) (:out r) (pos? (.-length (:out r))))
+      (let [dir (str out-dir "/" node)
+            p (str dir "/" filename)
+            remote (str "$HOME/ComfyUI/" (or type "output") "/" (when-not (str/blank? (str subfolder)) (str subfolder "/")) filename)]
+        (fs/mkdirSync dir #js {:recursive true})
+        (fs/writeFileSync p (:out r))
+        (when (= (.-length (:out r)) (.-size (fs/statSync p)))
+          (ssh host (str "f=" (sh-quote-dollar remote) "; [ -f \"$f\" ] && [ \"$(stat -f %z \"$f\")\" = \"" (.-length (:out r)) "\" ] && rm -f \"$f\"")))
+        {:path p :bytes (.-length (:out r)) :buf (:out r)}))))
+
+;; ---------------------------------------------------------------- tts over ssh (mlx-audio CLI)
+
+(defn tts-run!
+  "Synthesise one line on an audio node with mlx-audio's CLI, bring the wav
+  home. Synchronous (a line is seconds), so it never enters pending."
+  [host node {:keys [text mlx-repo voice n]}]
+  (let [name (str "oppai-voice-" n)
+        remote-dir "$HOME/.murakumo/oppai-voice"
+        script (str "mkdir -p " remote-dir " && cd " remote-dir " && "
+                    "$HOME/.local/share/murakumo-venv/bin/python3 -m mlx_audio.tts.generate "
+                    "--model " (sh-quote mlx-repo) " --text " (sh-quote text)
+                    " --voice " (sh-quote voice)
+                    " --file_prefix " name " --lang_code ja >/dev/null 2>&1; "
+                    "f=$(ls -t " remote-dir "/" name "*.wav 2>/dev/null | head -1); "
+                    "[ -n \"$f\" ] && cat \"$f\" && rm -f \"$f\"")
+        t0 (.now js/Date)
+        r (ssh host script true)]
+    (when (and (zero? (:exit r)) (:out r) (pos? (.-length (:out r))))
+      (let [dir (str out-dir "/" node) p (str dir "/" name ".wav")]
+        (fs/mkdirSync dir #js {:recursive true})
+        (fs/writeFileSync p (:out r))
+        {:path p :bytes (.-length (:out r)) :buf (:out r)
+         :seconds (let [b (:out r)] (when (>= (.-length b) 44)
+                                      (let [rate (.readUInt32LE b 24) bps (.readUInt16LE b 32)]
+                                        (when (pos? (* rate bps)) (/ (- (.-length b) 44) (* rate bps))))))
+         :wall-ms (- (.now js/Date) t0)}))))
+
+;; ---------------------------------------------------------------- gad generation api (loopback)
+
+(def gad-api "http://127.0.0.1:8081")
+
+(defn gad-auth-prefix
+  "The token is read on gad, inside the session, and never printed."
+  []
+  "TOKEN=$(sudo -n grep '^MURAKUMO_GENERATION_TOKEN=' /etc/murakumo-generation.env | cut -d= -f2-); ")
+
+(defn gad-submit! [job]
+  (let [frames (let [raw (max 9 (js/Math.round (* 24 (:seconds job 3))))] (min 121 (inc (* 8 (quot raw 8)))))
+        body (js/JSON.stringify (clj->js {:type "video" :input {:prompt (:prompt job)}
+                                          :params {:model (:model job) :width (:width job) :height (:height job)
+                                                   :frames frames :seed (:seed job)}}))
+        r (ssh "gad" (str (gad-auth-prefix)
+                          "curl -s --max-time 30 -X POST -H \"authorization: Bearer $TOKEN\" -H 'content-type: application/json' "
+                          "--data-binary @- " gad-api "/v1/generation <<'OPPAI_JOB'\n" body "\nOPPAI_JOB\n"))
+        resp (when (zero? (:exit r)) (json-parse (:out r)))]
+    (if-let [id (:jobId resp)]
+      id
+      (do (println "  gad submit failed:" (or (some-> resp pr-str) (:err r))) nil))))
+
+(defn gad-status [job-id]
+  (let [r (ssh "gad" (str (gad-auth-prefix) "curl -s --max-time 10 -H \"authorization: Bearer $TOKEN\" "
+                          gad-api "/v1/generation/jobs/" job-id))]
+    (when (zero? (:exit r)) (json-parse (:out r)))))
+
+(defn gad-fetch! [job-id node]
+  (let [r (ssh "gad" (str (gad-auth-prefix) "curl -s --max-time 120 -H \"authorization: Bearer $TOKEN\" "
+                          gad-api "/v1/generation/jobs/" job-id "/artifact") true)]
+    (when (and (zero? (:exit r)) (:out r) (pos? (.-length (:out r))))
+      (let [dir (str out-dir "/" node) p (str dir "/oppai-eros-" job-id ".mp4")]
+        (fs/mkdirSync dir #js {:recursive true})
+        (fs/writeFileSync p (:out r))
+        {:path p :bytes (.-length (:out r)) :buf (:out r)}))))
+
+;; ---------------------------------------------------------------- receipts
+
+(defn- artifact-kind [job]
+  (case (:kind job) :txt2img :image (:ltx-t2v :svd-i2v :generation-api-video) :video :tts :audio))
+
+(defn receipt! [profile job node fetched extra]
+  (let [kind (artifact-kind job)
+        [w h] (when (= :image kind) (png-size (:buf fetched)))
+        measured (cond-> {:kind kind :bytes (:bytes fetched)}
+                   w (assoc :width w :height h)
+                   (:seconds fetched) (assoc :seconds (:seconds fetched)))
+        q (bot/quality profile measured)
+        rec (merge {:at (now-iso) :bot (:bot/id profile) :lane (:lane job) :n (:n job) :seed (:seed job)
+                    :node node :model (:model job) :kind kind
+                    :prompt (:prompt job) :tags (:tags job) :text (:text job)
+                    :path (:path fetched) :bytes (:bytes fetched) :sha256 (sha256 (:buf fetched))
+                    :quality (:verdict q) :quality-reasons (:reasons q)}
+                   (when w {:width w :height h})
+                   extra)]
+    (append-line! (str state-dir "/receipts.edn") rec)
+    (println (str "  receipt " node " " (name (:lane job)) "#" (:n job) " " (name (:verdict q))
+                  " " (:bytes fetched) "B" (when w (str " " w "x" h))
+                  (when (seq (:tags job)) (str " tags=" (count (:tags job))))
+                  (when (seq (:reasons q)) (str " -- " (str/join "; " (:reasons q))))))
+    rec))
+
+;; ---------------------------------------------------------------- the tick
+
+(defn collect!
+  "Every pending job: ask its node; done -> fetch + receipt; error -> receipt with :failed."
+  [profile pending]
+  (reduce-kv
+   (fn [still id job]
+     (let [node (:node job)
+           host (:host job)]
+       (case (:via job)
+         :comfy
+         (let [{:keys [status outputs messages]} (comfy-history host id)]
+           (case status
+             :done (do (doseq [o outputs]
+                         (if-let [f (comfy-fetch! host o node)]
+                           (receipt! profile job node f {:prompt-id id :submitted-at (:submitted-at job)
+                                                         :wall-s (quot (- (.now js/Date) (:submitted-ms job)) 1000)})
+                           (println "  fetch failed" node id (:filename o))))
+                       still)
+             :error (do (append-line! (str state-dir "/receipts.edn")
+                                      {:at (now-iso) :bot (:bot/id profile) :lane (:lane job) :n (:n job) :node node
+                                       :quality :failed :prompt-id id :error (pr-str messages)})
+                        (println "  FAILED on" node ":" (pr-str (take 1 messages)))
+                        still)
+             :running (assoc still id job)
+             :unknown (do (println "  " node "did not answer for" id "; kept pending") (assoc still id job))))
+         :gad
+         (let [s (gad-status id)]
+           (case (:status s)
+             "done" (do (if-let [f (gad-fetch! id node)]
+                          (receipt! profile job node f {:job-id id :wall-s (quot (- (.now js/Date) (:submitted-ms job)) 1000)})
+                          (println "  gad fetch failed" id))
+                        still)
+             ("failed" "cancelled") (do (append-line! (str state-dir "/receipts.edn")
+                                                      {:at (now-iso) :bot (:bot/id profile) :lane (:lane job) :n (:n job)
+                                                       :node node :quality :failed :job-id id :error (pr-str (:error s))})
+                                        (println "  gad job" id (:status s) (pr-str (:error s)))
+                                        still)
+             (assoc still id job))))))
+   {} pending))
+
+(defn passed-image-for
+  "For the SVD lane's job n: a :pass image receipt from one of its source
+  lanes — the n-th newest, wrapping, so consecutive SVD jobs animate
+  different stills rather than the same one twice."
+  [source-lanes n]
+  (let [p (str state-dir "/receipts.edn")]
+    (when (fs/existsSync p)
+      (let [passed (->> (str/split-lines (fs/readFileSync p "utf8"))
+                        (remove str/blank?)
+                        (map reader/read-string)
+                        (filter #(and (= :pass (:quality %)) (= :image (:kind %)) (some #{(:lane %)} source-lanes)
+                                      (fs/existsSync (:path %))))
+                        reverse
+                        vec)]
+        (when (seq passed) (nth passed (mod n (count passed))))))))
+
+(defn submit-for-node!
+  "Fill `node` up to the cap with jobs of its lane. -> {:submitted n :pending pending'}"
+  [profile node lane counters pending queue]
+  (let [cap (get-in profile [:bot/schedule :per-node-queue-max] 1)
+        room (max 0 (- cap queue))
+        ;; ~/.ssh/config resolves every fleet node by its bare name (measured 2026-09-11)
+        host node]
+    (loop [i 0 counters counters pending pending submitted 0]
+      (if (>= i room)
+        {:counters counters :pending pending :submitted submitted}
+        (let [lane-id (:lane/id lane)
+              n (get counters lane-id 0)
+              job (bot/compose profile lane-id n)
+              prefix (str "oppai-" (name lane-id) "-" n)]
+          (case (:kind job)
+            (:txt2img :ltx-t2v)
+            (let [g (bot/graph job prefix)]
+              (if dry-run?
+                (do (println "  DRY" node (name lane-id) "#" n (subs (str (:prompt job)) 0 80) "…"
+                            (when (seq (:tags job)) (str "tags=" (count (:tags job)))))
+                    (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
+                (if-let [id (comfy-submit! host g (str "oppai-studio-" node))]
+                  (do (println "  queued" node (name lane-id) "#" n "->" id)
+                      (recur (inc i) (assoc counters lane-id (inc n))
+                             (assoc pending id (assoc job :node node :host host :via :comfy
+                                                      :submitted-at (now-iso) :submitted-ms (.now js/Date)))
+                             (inc submitted)))
+                  {:counters counters :pending pending :submitted submitted})))
+            :svd-i2v
+            (if-let [src (passed-image-for (:source-lanes job) n)]
+              (let [remote-name (str "oppai-src-" (:n src) "-" (subs (:sha256 src) 0 8) ".png")]
+                (println "  svd: source" (:path src))
+                ;; the multipart body must be the file itself; send it via base64 to keep sh-safe
+                (let [b64 (.toString (fs/readFileSync (:path src)) "base64")
+                      r (ssh host (str "printf '%s' '" b64 "' | base64 -d > /tmp/" remote-name " && "
+                                       "curl -s --max-time 60 -F 'image=@/tmp/" remote-name "' -F overwrite=true "
+                                       "http://localhost:" comfy-port "/upload/image"))
+                      resp (when (zero? (:exit r)) (json-parse (:out r)))]
+                  (if-let [uploaded (:name resp)]
+                    (let [g (bot/graph (assoc job :image uploaded) prefix)]
+                      (if dry-run?
+                        (do (println "  DRY" node "svd from" uploaded) (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
+                        (if-let [id (comfy-submit! host g (str "oppai-studio-" node))]
+                          (do (println "  queued" node "svd #" n "->" id)
+                              (recur (inc i) (assoc counters lane-id (inc n))
+                                     (assoc pending id (assoc job :node node :host host :via :comfy :source (:sha256 src)
+                                                              :submitted-at (now-iso) :submitted-ms (.now js/Date)))
+                                     (inc submitted)))
+                          {:counters counters :pending pending :submitted submitted})))
+                    (do (println "  svd: upload failed on" node (pr-str (or resp (:err r))))
+                        {:counters counters :pending pending :submitted submitted}))))
+              (do (println "  svd: no passed source image yet; skipping") {:counters counters :pending pending :submitted submitted}))
+            :tts
+            (if dry-run?
+              (do (println "  DRY" node "tts #" n (:text job)) (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
+              (if-let [f (tts-run! host node job)]
+                (do (receipt! profile job node f {:wall-ms (:wall-ms f)})
+                    (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
+                (do (println "  tts failed on" node) {:counters counters :pending pending :submitted submitted})))
+            :generation-api-video
+            (if dry-run?
+              (do (println "  DRY gad eros #" n) (recur (inc i) (assoc counters lane-id (inc n)) pending (inc submitted)))
+              (if-let [id (gad-submit! job)]
+                (do (println "  queued gad eros #" n "->" id)
+                    (recur (inc i) (assoc counters lane-id (inc n))
+                           (assoc pending id (assoc job :node node :host "gad" :via :gad
+                                                    :submitted-at (now-iso) :submitted-ms (.now js/Date)))
+                           (inc submitted)))
+                {:counters counters :pending pending :submitted submitted}))))))))
+
+(defn node-queue
+  "Queue depth per node, by lane kind: ComfyUI's /queue for comfy lanes, the
+  count of pending jobs we hold for gad, 0 for tts (synchronous)."
+  [node lane pending]
+  (case (:lane/kind lane)
+    (:txt2img :ltx-t2v :svd-i2v)
+    (comfy-queue node)
+    :generation-api-video (count (filter #(= "gad" (:node %)) (vals pending)))
+    :tts 0))
+
+(defn- exit!
+  "process.exit skips `finally`, so the lock is released here, explicitly,
+  before every exit (measured: the first dry-run left its lock behind)."
+  [code]
+  (when (fs/existsSync lock-file) (fs/unlinkSync lock-file))
+  (js/process.exit code))
+
+(defn report!
+  "What the ledger says, per node: receipts, pass / fail / unmeasured, median
+  wall seconds. Reads only; the fleet is not touched."
+  []
+  (let [p (str state-dir "/receipts.edn")
+        rs (if (fs/existsSync p)
+             (->> (str/split-lines (fs/readFileSync p "utf8")) (remove str/blank?) (map reader/read-string))
+             [])
+        pending (read-edn (str state-dir "/pending.edn") {})
+        med (fn [xs] (let [v (vec (sort xs))] (when (seq v) (nth v (quot (count v) 2)))))]
+    (println (str "RECEIPTS\t" (count rs) "  pending=" (count pending)))
+    (doseq [[node group] (sort-by key (group-by :node rs))]
+      (let [q (frequencies (map :quality group))
+            walls (keep :wall-s group)]
+        (println (str "  " (.padEnd (str node) 10)
+                      " n=" (count group)
+                      " pass=" (get q :pass 0) " fail=" (+ (get q :fail 0) (get q :failed 0))
+                      " unmeasured=" (get q :unmeasured 0)
+                      (when (seq walls) (str " median-wall-s=" (med walls)))
+                      " lanes=" (pr-str (vec (distinct (map :lane group))))))))
+    (when (zero? (count rs)) (println "  (no receipts yet)"))
+    (js/process.exit 0)))
+
+(defn -main []
+  (fs/mkdirSync state-dir #js {:recursive true})
+  (when (flag? "--report") (report!))
+  (when (fs/existsSync lock-file)
+    (let [age (- (.now js/Date) (.-mtimeMs (fs/statSync lock-file)))]
+      (if (< age (* 30 60 1000))
+        (do (println "REFUSED lock held" lock-file "age-s" (quot age 1000)) (js/process.exit 2)) ; not ours: leave it
+        (println "stale lock, taking it"))))
+  (fs/writeFileSync lock-file (str (.-pid js/process)))
+  (try
+    (let [raw (reader/read-string (fs/readFileSync profile-file "utf8"))
+          [profile problems] (bot/validate-profile raw)]
+      (when problems
+        (println "REFUSED profile invalid:") (doseq [p problems] (println "  -" p))
+        (exit! 2))
+      (let [pending (read-edn (str state-dir "/pending.edn") {})
+            counters (read-edn (str state-dir "/counters.edn") {})
+            _ (println (str "oppai-studio tick " (now-iso) " pending=" (count pending)
+                            " counters=" (pr-str counters) (when dry-run? " DRY-RUN")))
+            pending (if dry-run? pending (collect! profile pending))
+            nodes (cond->> (mapcat (fn [l] (map #(vector % l) (:lane/nodes l))) (:bot/lanes profile))
+                    only (filter #(only (first %))))
+            result (reduce (fn [{:keys [counters pending unanswered submitted]} [node lane]]
+                             (let [q (node-queue node lane pending)]
+                               (if (nil? q)
+                                 (do (println "  " node "unmeasured (ComfyUI did not answer); lane" (name (:lane/id lane)) "skipped")
+                                     {:counters counters :pending pending :unanswered (conj unanswered node) :submitted submitted})
+                                 (let [r (submit-for-node! profile node lane counters pending q)]
+                                   {:counters (:counters r) :pending (:pending r) :unanswered unanswered
+                                    :submitted (+ submitted (:submitted r))}))))
+                           {:counters counters :pending pending :unanswered [] :submitted 0}
+                           nodes)]
+        (when-not dry-run?
+          (write-edn! (str state-dir "/pending.edn") (:pending result))
+          (write-edn! (str state-dir "/counters.edn") (:counters result)))
+        (println (str "SUMMARY nodes=" (count nodes) " submitted=" (:submitted result)
+                      " pending=" (count (:pending result)) " unanswered=" (pr-str (:unanswered result))))
+        (exit! (if (seq (:unanswered result)) 1 0))))
+    (catch :default e
+      (println "ERROR" (.-message e))
+      (exit! 2))))
+
+(-main)
