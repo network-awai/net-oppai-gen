@@ -1,0 +1,10 @@
+(ns producer-tick
+  (:require [producer-io :as p] ["os" :as os] ["path" :as path]))
+
+(let [input (first *command-line-args*)
+      iso (.toISOString (js/Date.))
+      hour (str (.replaceAll (subs iso 0 10) "-" "") "T" (subs iso 11 13) "Z")]
+  (when-not input (throw (js/Error. "Usage: kbb --backend sci --classpath scripts scripts/producer_tick.cljk request.json")))
+  (println (js/JSON.stringify
+            (clj->js (p/run! (path/join (os/homedir) ".local/state/oppai-producer")
+                             hour (p/read-json input) p/request!)))))

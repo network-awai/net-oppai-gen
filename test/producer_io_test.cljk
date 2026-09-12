@@ -1,0 +1,41 @@
+(ns producer-io-test
+  (:require [producer-io :as p] [cljs.test :as t :refer [deftest is run-tests]]
+            ["fs" :as fs] ["os" :as os] ["path" :as path]))
+(def request {:model "waiREALMIX_v11" :prompt "Fictional adult portrait, fully clothed"
+              :publication_consent "public-examples-v1"})
+(defn temp [] (fs/mkdtempSync (path/join (os/tmpdir) "producer-test-")))
+(deftest duplicate-and-pending
+  (let [root (temp) calls (atom [])
+        send (fn [method _ _ out]
+               (swap! calls conj method)
+               (p/save! out {:price 0 :image "data:image/png;base64,test"}) 200)]
+    (is (= "generated" (:state (p/run! root "20260912T04Z" request send))))
+    (is (= "generated" (:state (p/run! root "20260912T04Z" request send))))
+    (is (= "pending" (:state (p/run! root "20260912T05Z" request send))))
+    (is (= ["GET" "POST"] @calls))))
+(deftest failures-stop-safely
+  (let [root (temp) calls (atom 0)
+        send (fn [method _ _ out]
+               (swap! calls inc)
+               (if (= "GET" method) (do (p/save! out {}) 200) (throw (js/Error. "timeout"))))]
+    (is (= "uncertain" (:state (p/run! root "20260912T04Z" request send))))
+    (is (= "pending" (:state (p/run! root "20260912T05Z" request send))))
+    (is (= 2 @calls)))
+  (let [root (temp)]
+    (is (= "skipped" (:state (p/run! root "20260912T04Z" request (fn [& _] 403)))))
+    (fs/mkdirSync (path/join root "run.lock"))
+    (is (thrown? js/Error (p/run! root "20260912T05Z" request (fn [& _] 200))))))
+(deftest admission
+  (is (not (p/valid-request? (assoc request :model "paid-model"))))
+  (is (not (p/valid-request? (dissoc request :publication_consent)))))
+(deftest price-and-quota
+  (doseq [price [nil 1]]
+    (is (= "uncertain"
+           (:state (p/run! (temp) "20260912T04Z" request
+                     (fn [_ _ _ out] (p/save! out {:price price :image "image"}) 200))))))
+  (is (= "skipped"
+         (:state (p/run! (temp) "20260912T04Z" request
+                   (fn [method _ _ out] (p/save! out {}) (if (= method "GET") 200 429)))))))
+(defmethod t/report [:cljs.test/default :end-run-tests] [m]
+  (set! (.-exitCode js/process) (if (t/successful? m) 0 1)))
+(run-tests)
