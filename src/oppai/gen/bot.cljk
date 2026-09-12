@@ -147,60 +147,74 @@
                                       (get-in profile [:bot/policy :negative-floor])]))))
 
 (defn- prompt-for
-  "The positive prompt for a lane, from one pick per bank."
+  "The positive prompt for a lane, from one pick per bank — and, from the
+  very same picks, the structured tags the work carries (shinshi-style:
+  every work is tagged, whatever style its prompt was written in).
+  -> {:prompt \"...\" :tags [...]}, deterministic from the same rs. A bank
+  entry without a :tags form contributes nothing to :tags (dropped, not
+  invented); the adult marker pick leads the list."
   [profile lane rs]
   (let [banks (:bot/banks profile)
         [r-adult r-body r-look r-outfit r-act r-expr r-scene r-cam] rs
         tags? (= :tags (:lane/prompt-style lane))
         f (if tags? :tags :natural)
+        picked [(pick (:body banks) r-body) (pick (:look banks) r-look)
+                (pick (:outfit banks) r-outfit) (pick (:act banks) r-act)
+                (pick (:expression banks) r-expr) (pick (:scene banks) r-scene)
+                (pick (:camera banks) r-cam)]
         adult (pick (get-in profile [:bot/policy (if tags? :adult-tags :adult-markers)]) r-adult)
-        parts (map f [(pick (:body banks) r-body) (pick (:look banks) r-look)
-                      (pick (:outfit banks) r-outfit) (pick (:act banks) r-act)
-                      (pick (:expression banks) r-expr) (pick (:scene banks) r-scene)
-                      (pick (:camera banks) r-cam)])]
-    (if tags?
-      (str/join ", " (remove str/blank? (concat [(:lane/quality lane) adult] parts)))
-      ;; natural: "<quality>, photo of a woman (adult marker) with …, <look>, <outfit>, <act>, <expr>, <scene>, <camera>"
-      (str/join ", " (remove str/blank? (concat [(:lane/quality lane)
-                                                 (str "photo of a woman (" adult ") " (nth parts 0) ", " (nth parts 1))
-                                                 (nth parts 2) (nth parts 3) (nth parts 4) (nth parts 5) (nth parts 6)]))))))
+        tags (vec (remove str/blank? (cons adult (keep :tags picked))))
+        parts (map f picked)]
+    {:tags tags
+     :prompt (if tags?
+               (str/join ", " (remove str/blank? (concat [(:lane/quality lane) adult] parts)))
+               ;; natural: "<quality>, photo of a woman (adult marker) with …, <look>, <outfit>, <act>, <expr>, <scene>, <camera>"
+               (str/join ", " (remove str/blank? (concat [(:lane/quality lane)
+                                                          (str "photo of a woman (" adult ") " (nth parts 0) ", " (nth parts 1))
+                                                          (nth parts 2) (nth parts 3) (nth parts 4) (nth parts 5) (nth parts 6)]))))}))
 
 (defn compose
   "Job n of lane `lane-id` -> a job map, or throws when the result would not
   pass the boundary (which is a bug in the banks, never something to skip
   quietly). Kinds:
 
-    :txt2img              {:prompt :negative :model :width :height :steps :cfg :seed}
+    :txt2img              {:prompt :tags :negative :model :width :height :steps :cfg :seed}
     :ltx-t2v              + {:clip :seconds :fps}
     :svd-i2v              {:seed :seconds :fps :width :height :steps} (image supplied by the tick)
-    :tts                  {:text :seed}
-    :generation-api-video {:prompt :seconds :width :height :seed}"
+    :tts                  {:text :seed} (voice lines carry no tags)
+    :generation-api-video {:prompt :tags :seconds :width :height :seed}"
   [profile lane-id n]
   (let [l (or (lane profile lane-id) (throw (ex-info "no such lane" {:lane lane-id})))
         seed (job-seed profile lane-id n)
         rs (seq-of seed 10)
         base {:bot (:bot/id profile) :lane lane-id :n n :seed seed :kind (:lane/kind l)
               :model (:lane/model l) :checkpoint (:lane/checkpoint l) :nodes (:lane/nodes l)}
-        check! (fn [job text]
+        check! (fn [job text tags]
                  (let [[ok reason] (allowed? profile text)]
                    (when-not ok (throw (ex-info "composed prompt fails the boundary" {:reason reason :job job})))
                    (when-not (adult-marked? profile text)
                      (throw (ex-info "composed prompt carries no adult marker" {:job job})))
+                   (when (seq tags)
+                     (let [joined (str/join ", " tags)
+                           [tok treason] (allowed? profile joined)]
+                       (when-not tok (throw (ex-info "composed tags fail the boundary" {:reason treason :job job})))
+                       (when-not (adult-marked? profile joined)
+                         (throw (ex-info "composed tags carry no adult marker" {:job job})))))
                    job))]
     (case (:lane/kind l)
       :txt2img
-      (let [prompt (prompt-for profile l rs)
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)
             [w h] (guard/parse-size (pick (:lane/sizes l) (nth rs 8)))]
-        (check! (assoc base :prompt prompt :negative (negative-for profile l)
+        (check! (assoc base :prompt prompt :tags tags :negative (negative-for profile l)
                        :width w :height h :steps (:lane/steps l 26) :cfg (:lane/cfg l 6.0))
-                prompt))
+                prompt tags))
       :ltx-t2v
-      (let [prompt (prompt-for profile l rs)]
-        (check! (assoc base :prompt prompt :negative (negative-for profile l)
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)]
+        (check! (assoc base :prompt prompt :tags tags :negative (negative-for profile l)
                        :clip (:lane/clip l) :width (:lane/width l) :height (:lane/height l)
                        :seconds (:lane/seconds l) :fps (:lane/fps l)
                        :steps (:lane/steps l) :cfg (:lane/cfg l))
-                prompt))
+                prompt tags))
       :svd-i2v
       (assoc base :source-lanes (:lane/source-lanes l) :width (:lane/width l) :height (:lane/height l)
              :seconds (:lane/seconds l) :fps (:lane/fps l) :steps (:lane/steps l))
@@ -208,10 +222,10 @@
       (let [line (pick (get-in profile [:bot/banks :voice-lines]) (nth rs 0))]
         (assoc base :text (:text line) :voice (:lane/voice l) :mlx-repo (:lane/mlx-repo l)))
       :generation-api-video
-      (let [prompt (prompt-for profile l rs)]
-        (check! (assoc base :prompt prompt :width (:lane/width l) :height (:lane/height l)
+      (let [{:keys [prompt tags]} (prompt-for profile l rs)]
+        (check! (assoc base :prompt prompt :tags tags :width (:lane/width l) :height (:lane/height l)
                        :seconds (:lane/seconds l))
-                prompt)))))
+                prompt tags)))))
 
 ;; ---- placement ---------------------------------------------------------------------
 
